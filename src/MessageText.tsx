@@ -8,12 +8,31 @@ type Props = {
   text: string;
   tone: "bot" | "user";
   linkTarget?: "_blank" | "_top";
+  /** Host of the parent page (from ?ctx). Same-host links navigate the parent
+   *  (_top) so the chat follows along and the conversation continues there. */
+  parentHost?: string;
 };
 
-export function MessageText({ text, tone, linkTarget = "_blank" }: Props) {
+/** Same-site links → _top (parent navigates, chat stays open). External → fallback. */
+function resolveLink(
+  href: string | undefined,
+  parentHost: string | undefined,
+  fallback: "_blank" | "_top",
+): { target: "_blank" | "_top"; rel: string } {
+  if (href && parentHost) {
+    try {
+      const u = new URL(href, `https://${parentHost}`);
+      if (u.host === parentHost) return { target: "_top", rel: "noopener" };
+    } catch {
+      // fall through to fallback
+    }
+  }
+  return { target: fallback, rel: fallback === "_blank" ? "noopener noreferrer" : "noopener" };
+}
+
+export function MessageText({ text, tone, linkTarget = "_blank", parentHost }: Props) {
   const linkColor = tone === "user" ? "text-white" : "text-[var(--cw-primary-hover)]";
   const strongColor = tone === "user" ? "text-white" : "text-[var(--cw-primary)]";
-  const rel = linkTarget === "_blank" ? "noopener noreferrer" : "noopener";
 
   return (
     <Markdown
@@ -37,16 +56,19 @@ export function MessageText({ text, tone, linkTarget = "_blank" }: Props) {
           </ol>
         ),
         li: ({ children }) => <li className="leading-[1.5]">{children}</li>,
-        a: ({ children, href }) => (
-          <a
-            href={href}
-            target={linkTarget}
-            rel={rel}
-            className={`underline underline-offset-2 ${linkColor} hover:opacity-80`}
-          >
-            {children}
-          </a>
-        ),
+        a: ({ children, href }) => {
+          const { target, rel } = resolveLink(href, parentHost, linkTarget);
+          return (
+            <a
+              href={href}
+              target={target}
+              rel={rel}
+              className={`underline underline-offset-2 ${linkColor} hover:opacity-80`}
+            >
+              {children}
+            </a>
+          );
+        },
         h1: ({ children }) => (
           <strong className={`block text-[14px] font-semibold mt-3 mb-1 ${strongColor}`}>
             {children}

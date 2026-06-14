@@ -1,16 +1,27 @@
 {
   "name": "@nettsmed/chat-widget",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "license": "UNLICENSED",
   "type": "module",
-  "files": ["src", "server", "public", "styles"],
+  "files": [
+    "src",
+    "server",
+    "public",
+    "styles"
+  ],
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
   "exports": {
-    ".": { "types": "./src/index.ts", "default": "./src/index.ts" },
-    "./server": { "types": "./server/index.ts", "default": "./server/index.ts" },
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./server": {
+      "types": "./server/index.ts",
+      "default": "./server/index.ts"
+    },
     "./styles.css": "./styles/widget.css",
     "./widget.js": "./public/widget.js",
     "./site-bridge.js": "./public/site-bridge.js",

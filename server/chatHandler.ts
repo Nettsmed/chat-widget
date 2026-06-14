@@ -120,6 +120,7 @@ export function createChatHandler(cfg: ChatHandlerConfig) {
       },
       onError: ({ error }) => {
         console.error("[chat] stream error:", error);
+        cfg.onStreamError?.(error);
       },
     });
 
@@ -127,6 +128,7 @@ export function createChatHandler(cfg: ChatHandlerConfig) {
       onError: (error) => {
         const msg = error instanceof Error ? error.message : String(error);
         console.error("[chat] response error:", msg);
+        cfg.onStreamError?.(error);
         return cfg.errorMessage;
       },
     });

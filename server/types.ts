@@ -23,6 +23,9 @@ export type ChatHandlerConfig = {
   logIp?: boolean;
   /** User-facing fallback returned on a streaming error. */
   errorMessage: string;
+  /** Called on a stream/response error so the app can report it (e.g. Sentry).
+   *  The package stays Sentry-agnostic; the app wires the reporter. */
+  onStreamError?: (err: unknown) => void;
   /** Max tool-call steps. Default 3. */
   stepCount?: number;
   /** Abuse guards. Defaults: 30 / 4000 / 16000. */

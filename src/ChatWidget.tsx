@@ -51,6 +51,19 @@ export function ChatWidget({
   const sessionId = useMemo(() => getOrCreateSessionId(), []);
   const leadPartType = `tool-${config.leadToolName}`;
 
+  // Host of the parent page (from ?ctx) — same-host links navigate the parent so
+  // the chat follows along and the conversation continues on the next page.
+  const parentHost = useMemo(() => {
+    if (typeof window === "undefined") return "";
+    try {
+      const ctx =
+        new URLSearchParams(window.location.search).get("ctx") || document.referrer || "";
+      return ctx ? new URL(ctx).host : "";
+    } catch {
+      return "";
+    }
+  }, []);
+
   const { messages, sendMessage, status, setMessages, regenerate } = useChat({
     transport: new DefaultChatTransport({
       api: config.apiPath ?? "/api/chat",
@@ -330,6 +343,7 @@ export function ChatWidget({
                           text={part.text}
                           tone={m.role === "user" ? "user" : "bot"}
                           linkTarget={config.linkTarget}
+                          parentHost={parentHost}
                         />
                       );
                     }

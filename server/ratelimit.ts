@@ -67,7 +67,12 @@ export async function checkRateLimit(ip: string, opts: RateLimitOptions = {}): P
 }
 
 export function getClientIp(req: Request): string {
+  // Prefer platform-set headers (Vercel sets x-real-ip / x-vercel-forwarded-for
+  // server-side — the client cannot spoof them). x-forwarded-for is client-
+  // appendable, so it's only a last resort for keying the rate limiter.
+  const real = req.headers.get("x-real-ip") || req.headers.get("x-vercel-forwarded-for");
+  if (real) return real.split(",")[0].trim();
   const forwarded = req.headers.get("x-forwarded-for");
   if (forwarded) return forwarded.split(",")[0].trim();
-  return req.headers.get("x-real-ip") ?? "unknown";
+  return "unknown";
 }
