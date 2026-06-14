@@ -1,0 +1,40 @@
+{
+  "name": "@nettsmed/chat-widget",
+  "version": "0.1.0",
+  "private": false,
+  "license": "UNLICENSED",
+  "type": "module",
+  "files": ["src", "server", "public", "styles"],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "exports": {
+    ".": { "types": "./src/index.ts", "default": "./src/index.ts" },
+    "./server": { "types": "./server/index.ts", "default": "./server/index.ts" },
+    "./styles.css": "./styles/widget.css",
+    "./widget.js": "./public/widget.js",
+    "./site-bridge.js": "./public/site-bridge.js",
+    "./package.json": "./package.json"
+  },
+  "peerDependencies": {
+    "next": "^16",
+    "react": "^19",
+    "react-dom": "^19",
+    "ai": "^6",
+    "@ai-sdk/react": "^3",
+    "@ai-sdk/anthropic": "^3",
+    "react-markdown": "^10",
+    "remark-gfm": "^4",
+    "@libsql/client": "^0.17",
+    "@upstash/ratelimit": "^2",
+    "@upstash/redis": "^1",
+    "zod": "^4"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "next": "^16",
+    "typescript": "^5"
+  }
+}

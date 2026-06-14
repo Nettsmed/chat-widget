@@ -1,0 +1,31 @@
+/* Shared chat-widget animations + scrollbar. Imported by each consuming app:
+   @import "@nettsmed/chat-widget/styles.css"; */
+
+.nettsmed-chat-root *::-webkit-scrollbar {
+  width: 6px;
+}
+.nettsmed-chat-root *::-webkit-scrollbar-track {
+  background: transparent;
+}
+.nettsmed-chat-root *::-webkit-scrollbar-thumb {
+  background: rgba(31, 49, 51, 0.15);
+  border-radius: 3px;
+}
+.nettsmed-chat-root *::-webkit-scrollbar-thumb:hover {
+  background: rgba(31, 49, 51, 0.3);
+}
+
+@keyframes chatIn {
+  0% { opacity: 0; transform: translateY(16px) scale(0.97); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes messageIn {
+  0% { opacity: 0; transform: translateY(6px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes dot {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+  40% { transform: scale(1.0); opacity: 1.0; }
+}
