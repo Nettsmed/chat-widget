@@ -11,8 +11,9 @@ export type ChatHandlerConfig = {
   model: string;
   /** Build the system prompt from fetched content + current page context. */
   buildSystemPrompt: (content: string, page: { url: string; title: string }) => string;
-  /** Fetch the knowledge content injected into the system prompt (live or static). */
-  getContent: () => Promise<string>;
+  /** Fetch the knowledge content injected into the system prompt (live or static).
+   *  Optional — omit when the content is already baked into buildSystemPrompt. */
+  getContent?: () => Promise<string>;
   /** Per-client tool registry. Receives access context + per-request info. */
   getTools: (ctx: AccessContext, req: RequestInfo) => ToolSet;
   /** Override the access-control seam. Defaults to anonymous public. */

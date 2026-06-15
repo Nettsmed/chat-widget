@@ -86,10 +86,14 @@ export function createChatHandler(cfg: ChatHandlerConfig) {
     }
 
     let content = "";
-    try {
-      content = await cfg.getContent();
-    } catch (err) {
-      console.error("[chat] content fetch failed:", err);
+    if (cfg.getContent) {
+      try {
+        content = await cfg.getContent();
+      } catch (err) {
+        // Don't silently answer ungrounded on a knowledge-source outage — report it.
+        console.error("[chat] content fetch failed:", err);
+        cfg.onStreamError?.(err);
+      }
     }
 
     const ctx = await resolveCtx(req);

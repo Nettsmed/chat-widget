@@ -4,6 +4,22 @@ All notable changes to `@nettsmed/chat-widget`. Format: Keep a Changelog + SemVe
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-15
+
+### Added
+- Accessibility: panel is `role="dialog"` (+ `aria-modal` when floating) and closes
+  on **Escape**; message log is `role="log" aria-live="polite" aria-busy`; typing
+  indicator announces "Skriver svar…" (sr-only); error banner is `role="alert"`.
+  Screen readers can now follow the conversation. `.cw-sr-only` util + a
+  `prefers-reduced-motion` block (WCAG 2.2.2) added to `styles.css`.
+- `ChatHandlerConfig.getContent` is now optional (omit when content is baked into
+  the prompt); a `getContent()` failure now calls `onStreamError` instead of
+  silently answering ungrounded.
+
+### Fixed
+- Prefill confirmation no longer hangs on "Fyller inn skjemaet…" when no bridge is
+  present on the page — it falls back (never falsely claims the form was filled).
+
 ## [0.2.0] - 2026-06-15
 
 ### Added

@@ -1,6 +1,30 @@
 /* Shared chat-widget animations + scrollbar. Imported by each consuming app:
    @import "@nettsmed/chat-widget/styles.css"; */
 
+/* Screen-reader-only text (typing announcement etc.) */
+.cw-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* WCAG 2.2.2 — honour reduced-motion: disable the widget animations. */
+@media (prefers-reduced-motion: reduce) {
+  .nettsmed-chat-root *,
+  .nettsmed-chat-root *::before,
+  .nettsmed-chat-root *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
 .nettsmed-chat-root *::-webkit-scrollbar {
   width: 6px;
 }

@@ -291,6 +291,12 @@ export function ChatWidget({
 
       {(isOpen || embed) && (
         <div
+          role="dialog"
+          aria-modal={embed ? undefined : "true"}
+          aria-label={`${config.assistantName} – ${config.tagline}`}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") handleClose();
+          }}
           className={
             embed
               ? "w-full h-screen bg-white flex flex-col"
@@ -322,6 +328,10 @@ export function ChatWidget({
 
           <div
             ref={scrollRef}
+            role="log"
+            aria-live="polite"
+            aria-busy={isStreaming}
+            aria-label={`Samtale med ${config.assistantName}`}
             className="flex-1 overflow-y-scroll px-4 py-5 space-y-3.5 bg-[var(--cw-msg-bg)]"
             style={{ scrollbarGutter: "stable" }}
           >
@@ -421,8 +431,16 @@ export function ChatWidget({
                       if (pp.state !== "output-available") return null;
                       const st = prefillStatus[m.id];
                       // Gate the confirmation on the ACTUAL bridge result — never
-                      // claim "filled" if nothing was written (no bridge / stale
-                      // selectors / timeout).
+                      // claim "filled" if nothing was written. "pending" only
+                      // while a fired request is in flight (8s timeout → fail);
+                      // undefined (no bridge on this page) falls back, never hangs.
+                      if (st === "pending") {
+                        return (
+                          <div key={i} className="mt-2 text-[12px] opacity-60 italic">
+                            Fyller inn skjemaet…
+                          </div>
+                        );
+                      }
                       if (st === "ok") {
                         return (
                           <div
@@ -434,23 +452,16 @@ export function ChatWidget({
                           </div>
                         );
                       }
-                      if (st === "fail") {
-                        return (
-                          <div
-                            key={i}
-                            className="mt-2 pt-2 border-t border-current/10 text-[12px] opacity-70 flex items-start gap-1.5"
-                          >
-                            <span className="shrink-0 mt-0.5">⚠</span>
-                            <span>
-                              {config.prefillFailMessage ??
-                                "Jeg fikk ikke fylt ut skjemaet automatisk her — bruk gjerne kontaktskjemaet direkte."}
-                            </span>
-                          </div>
-                        );
-                      }
                       return (
-                        <div key={i} className="mt-2 text-[12px] opacity-60 italic">
-                          Fyller inn skjemaet…
+                        <div
+                          key={i}
+                          className="mt-2 pt-2 border-t border-current/10 text-[12px] opacity-70 flex items-start gap-1.5"
+                        >
+                          <span className="shrink-0 mt-0.5">⚠</span>
+                          <span>
+                            {config.prefillFailMessage ??
+                              "Jeg fikk ikke fylt ut skjemaet automatisk her — bruk gjerne kontaktskjemaet direkte."}
+                          </span>
                         </div>
                       );
                     }
@@ -467,7 +478,8 @@ export function ChatWidget({
                     {config.avatarLetter}
                   </div>
                   <div className="bg-white rounded-[10px] rounded-tl-[4px] px-3.5 py-3.5 border border-[var(--cw-border)]/60">
-                    <span className="flex gap-1.5 items-center">
+                    <span className="cw-sr-only">Skriver svar…</span>
+                    <span className="flex gap-1.5 items-center" aria-hidden="true">
                       <span className="w-1.5 h-1.5 bg-[var(--cw-primary-hover)] rounded-full animate-[dot_1.2s_ease-in-out_infinite]"></span>
                       <span className="w-1.5 h-1.5 bg-[var(--cw-primary-hover)] rounded-full animate-[dot_1.2s_ease-in-out_infinite] [animation-delay:0.15s]"></span>
                       <span className="w-1.5 h-1.5 bg-[var(--cw-primary-hover)] rounded-full animate-[dot_1.2s_ease-in-out_infinite] [animation-delay:0.3s]"></span>
@@ -477,7 +489,7 @@ export function ChatWidget({
               )}
 
             {errorMsg && !isStreaming && (
-              <div className="flex items-start gap-2 bg-[var(--cw-error-bg)] border border-[var(--cw-error-border)] rounded-[8px] px-3 py-2.5 text-[12.5px] text-[var(--cw-error-text)]">
+              <div role="alert" className="flex items-start gap-2 bg-[var(--cw-error-bg)] border border-[var(--cw-error-border)] rounded-[8px] px-3 py-2.5 text-[12.5px] text-[var(--cw-error-text)]">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="shrink-0 mt-0.5" aria-hidden="true">
                   <circle cx="8" cy="8" r="6.5" />
                   <path d="M8 5 L8 8.5 M8 11 L8 11.01" strokeLinecap="round" />
