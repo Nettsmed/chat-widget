@@ -98,16 +98,21 @@ export function createChatHandler(cfg: ChatHandlerConfig) {
 
     const ctx = await resolveCtx(req);
     const tools = cfg.getTools(ctx, { messages, referer: referer ?? null });
+    const systemPrompt = cfg.buildSystemPrompt(content, { url: pageUrl, title: pageTitle });
 
     const result = streamText({
       model: anthropic(cfg.model),
-      system: cfg.buildSystemPrompt(content, { url: pageUrl, title: pageTitle }),
-      messages: modelMessages,
-      providerOptions: {
-        anthropic: {
-          cacheControl: { type: "ephemeral" },
+      // Cache the (large, stable) system prompt via a cache breakpoint on the
+      // system message — top-level providerOptions does NOT cache the system
+      // string. Cuts input tokens ~70% on repeat turns.
+      messages: [
+        {
+          role: "system",
+          content: systemPrompt,
+          providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
         },
-      },
+        ...modelMessages,
+      ],
       stopWhen: stepCountIs(stepCount),
       tools,
       onFinish: ({ text }) => {

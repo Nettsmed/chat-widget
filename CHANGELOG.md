@@ -4,6 +4,14 @@ All notable changes to `@nettsmed/chat-widget`. Format: Keep a Changelog + SemVe
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-15
+
+### Fixed
+- **Prompt caching now actually works.** Moved the Anthropic `cacheControl`
+  ephemeral breakpoint from top-level `providerOptions` (a no-op for the system
+  string) onto a `role:"system"` message in `messages`. The large stable system
+  prompt is now cached → ~70% input-token reduction on repeat turns.
+
 ## [0.3.0] - 2026-06-15
 
 ### Added
