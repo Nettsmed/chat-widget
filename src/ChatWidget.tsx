@@ -4,6 +4,7 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { useState, useRef, useEffect, useMemo } from "react";
 import { MessageText } from "./MessageText";
+import { createBridgeClient } from "./siteBridgeClient";
 import type { ChatWidgetConfig } from "./types";
 
 const STORAGE_KEY = "nettsmed-chat-messages-v1";
@@ -51,18 +52,30 @@ export function ChatWidget({
   const sessionId = useMemo(() => getOrCreateSessionId(), []);
   const leadPartType = `tool-${config.leadToolName}`;
 
-  // Host of the parent page (from ?ctx) — same-host links navigate the parent so
-  // the chat follows along and the conversation continues on the next page.
-  const parentHost = useMemo(() => {
-    if (typeof window === "undefined") return "";
+  // Parent page host + origin (from ?ctx). Host drives same-site link follow;
+  // origin scopes the site-bridge postMessage target.
+  const { parentHost, parentOrigin } = useMemo(() => {
+    if (typeof window === "undefined") return { parentHost: "", parentOrigin: "" };
     try {
       const ctx =
         new URLSearchParams(window.location.search).get("ctx") || document.referrer || "";
-      return ctx ? new URL(ctx).host : "";
+      if (!ctx) return { parentHost: "", parentOrigin: "" };
+      const u = new URL(ctx);
+      return { parentHost: u.host, parentOrigin: u.origin };
     } catch {
-      return "";
+      return { parentHost: "", parentOrigin: "" };
     }
   }, []);
+
+  // Site-bridge client (iframe side) — only when embedded with a known parent
+  // origin and the tenant enabled a prefill tool.
+  const bridge = useMemo(
+    () => (parentOrigin && config.prefillToolName ? createBridgeClient(parentOrigin) : null),
+    [parentOrigin, config.prefillToolName],
+  );
+  useEffect(() => () => bridge?.dispose(), [bridge]);
+  const firedPrefill = useRef<Set<string>>(new Set());
+  const [prefillStatus, setPrefillStatus] = useState<Record<string, "pending" | "ok" | "fail">>({});
 
   const { messages, sendMessage, status, setMessages, regenerate } = useChat({
     transport: new DefaultChatTransport({
@@ -142,6 +155,33 @@ export function ChatWidget({
       behavior: "smooth",
     });
   }, [messages, status]);
+
+  // When the prefill tool returns {action:"prefill", form, fields}, ask the
+  // parent (via the site-bridge) to fill its form. Fire once per message.
+  useEffect(() => {
+    if (!bridge || !config.prefillToolName) return;
+    const partType = `tool-${config.prefillToolName}`;
+    for (const m of messages) {
+      if (m.role !== "assistant" || firedPrefill.current.has(m.id)) continue;
+      for (const part of m.parts ?? []) {
+        const p = part as {
+          type?: string;
+          state?: string;
+          output?: { action?: string; form?: string; fields?: Record<string, unknown> };
+        };
+        if (p.type !== partType || p.state !== "output-available") continue;
+        if (p.output?.action === "prefill" && p.output.form) {
+          const mid = m.id;
+          firedPrefill.current.add(mid);
+          setPrefillStatus((s) => ({ ...s, [mid]: "pending" }));
+          bridge
+            .request("prefill", { form: p.output.form, fields: p.output.fields ?? {} })
+            .then((r) => setPrefillStatus((s) => ({ ...s, [mid]: r.ok ? "ok" : "fail" })))
+            .catch(() => setPrefillStatus((s) => ({ ...s, [mid]: "fail" })));
+        }
+      }
+    }
+  }, [messages, bridge, config.prefillToolName]);
 
   const isStreaming = status === "streaming" || status === "submitted";
 
@@ -372,6 +412,47 @@ export function ChatWidget({
                         );
                       }
                       return null;
+                    }
+                    if (config.prefillToolName && part.type === `tool-${config.prefillToolName}`) {
+                      const pp = part as unknown as {
+                        state: string;
+                        output?: { ok?: boolean; message?: string };
+                      };
+                      if (pp.state !== "output-available") return null;
+                      const st = prefillStatus[m.id];
+                      // Gate the confirmation on the ACTUAL bridge result — never
+                      // claim "filled" if nothing was written (no bridge / stale
+                      // selectors / timeout).
+                      if (st === "ok") {
+                        return (
+                          <div
+                            key={i}
+                            className="mt-2 pt-2 border-t border-current/10 text-[12px] opacity-70 flex items-start gap-1.5"
+                          >
+                            <span className="text-[var(--cw-accent)] shrink-0 mt-0.5">✓</span>
+                            <span>{pp.output?.message}</span>
+                          </div>
+                        );
+                      }
+                      if (st === "fail") {
+                        return (
+                          <div
+                            key={i}
+                            className="mt-2 pt-2 border-t border-current/10 text-[12px] opacity-70 flex items-start gap-1.5"
+                          >
+                            <span className="shrink-0 mt-0.5">⚠</span>
+                            <span>
+                              {config.prefillFailMessage ??
+                                "Jeg fikk ikke fylt ut skjemaet automatisk her — bruk gjerne kontaktskjemaet direkte."}
+                            </span>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div key={i} className="mt-2 text-[12px] opacity-60 italic">
+                          Fyller inn skjemaet…
+                        </div>
+                      );
                     }
                     return null;
                   })}

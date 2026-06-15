@@ -4,6 +4,19 @@ All notable changes to `@nettsmed/chat-widget`. Format: Keep a Changelog + SemVe
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-15
+
+### Added
+- **Site-bridge**: generic, config-driven capability for the chat iframe to
+  prefill a host-page form (and scroll) WITHOUT naming a selector. The iframe
+  sends only logical field keys; the parent (`public/site-bridge.js`) maps keys
+  to selectors from `window.__SITE_BRIDGE_CONFIG__` (allowlist), origin-validated
+  both directions, prefill-only (never submits), values via `.value` + length
+  clamp. New `src/siteBridgeClient.ts` (iframe client with correlation ids +
+  timeout). `ChatWidgetConfig.prefillToolName` opts a tenant in: when that tool
+  returns `{action:"prefill", form, fields}`, the widget drives the bridge.
+- Exports: `createBridgeClient`, `BridgeClient`, `BridgeResult`.
+
 ## [0.1.1] - 2026-06-14
 
 ### Added

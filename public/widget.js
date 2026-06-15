@@ -103,6 +103,13 @@
     iframe.src = base + "/embed?ctx=" + encodeURIComponent(window.location.href) + "&t=" + encodeURIComponent((document.title || "").slice(0, 200));
     iframe.title = TITLE;
     iframe.setAttribute("allow", "clipboard-write");
+    // Register this iframe as the trusted source for the site-bridge (origin
+    // alone is shared across tenants — the bridge also pins to ev.source).
+    iframe.addEventListener("load", function () {
+      try {
+        if (window.__SITE_BRIDGE_CONFIG__) window.__SITE_BRIDGE_CONFIG__.frame = iframe.contentWindow;
+      } catch (e) {}
+    });
     wrap.appendChild(iframe);
 
     var SESSION_KEY = "nettsmed_chat_open";

@@ -39,13 +39,15 @@ export type ChatWidgetConfig = {
   // lead/contact tool wiring
   leadToolName: string; // matches `tool-${leadToolName}`
   leadEventName: string; // GA event name on successful lead
+  /** Tool whose output {action:"prefill", form, fields} drives a site-bridge
+   *  prefill of the host page's form. Omit to disable site-bridge prefill. */
+  prefillToolName?: string;
+  /** Shown instead of the tool's success copy when the bridge prefill actually
+   *  failed (no bridge on the page, stale selectors, timeout). */
+  prefillFailMessage?: string;
   // theming
   colors: ChatWidgetColors;
   // behavior
   apiPath?: string; // default "/api/chat"
   linkTarget?: "_blank" | "_top"; // default "_blank"
-};
-
-export type BridgeClient = {
-  request: (action: string, payload?: unknown) => Promise<unknown>;
 };
