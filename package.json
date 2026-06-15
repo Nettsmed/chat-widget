@@ -11,7 +11,8 @@
     "styles"
   ],
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "exports": {
     ".": {
@@ -28,17 +29,17 @@
     "./package.json": "./package.json"
   },
   "peerDependencies": {
-    "next": "^16",
-    "react": "^19",
-    "react-dom": "^19",
-    "ai": "^6",
-    "@ai-sdk/react": "^3",
     "@ai-sdk/anthropic": "^3",
-    "react-markdown": "^10",
-    "remark-gfm": "^4",
+    "@ai-sdk/react": "^3",
     "@libsql/client": "^0.17",
     "@upstash/ratelimit": "^2",
     "@upstash/redis": "^1",
+    "ai": "^6",
+    "next": "^16",
+    "react": "^19",
+    "react-dom": "^19",
+    "react-markdown": "^10",
+    "remark-gfm": "^4",
     "zod": "^4"
   },
   "devDependencies": {
@@ -46,6 +47,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "next": "^16",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.9"
   }
 }
