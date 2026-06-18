@@ -37,6 +37,25 @@ Brand colors are `--cw-*` CSS variables set from `config.colors` on the widget
 root. Class strings are identical across tenants, so Tailwind scans the package
 once. Never use per-brand arbitrary hex classes in the package.
 
+## Use from raw serverless (non-Next)
+
+`./server` has no React/Next dependency. In a plain Vercel Node/Edge function:
+
+```ts
+import { createChatHandler, setBackgroundRunner } from "@nettsmed/chat-widget/server";
+// Optional: forward background work to the platform if available.
+// import { waitUntil } from "@vercel/functions"; setBackgroundRunner(waitUntil);
+
+export const POST = createChatHandler({
+  model: "claude-haiku-4-5",
+  apiKey: process.env.CLIENT_ANTHROPIC_KEY,          // BYOK (optional)
+  spendCap: { tenantKey: "tilbud", dailyTokens: 200_000 },
+  buildSystemPrompt: (content, page) => `...`,
+  getTools: () => ({}),
+  errorMessage: "Beklager, noe gikk galt.",
+});
+```
+
 ## Distribution
 
 Private `github:` git-tag dependency. Bump `version` + tag `vX.Y.Z`; customers

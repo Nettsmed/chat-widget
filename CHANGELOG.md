@@ -4,6 +4,17 @@ All notable changes to `@nettsmed/chat-widget`. Format: Keep a Changelog + SemVe
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-18
+
+### Added
+- `./server` is now framework-agnostic — raw serverless (non-Next) hosts can consume the chat pipeline. Inject the host scheduler with `setBackgroundRunner(after)` (Next) or leave unset (fire-and-forget fallback).
+- BYOK: `ChatHandlerConfig.apiKey` routes a tenant's traffic to its own Anthropic key (per-tenant billing). Omit for Nettsmed-managed default.
+- Per-tenant daily token spend cap: `ChatHandlerConfig.spendCap = { tenantKey, dailyTokens }`. Over budget → graceful `errorMessage`, no model call. Fails closed.
+
+### Changed
+- `server/turso.ts` no longer imports `next/server`; uses the injectable `runBackground`.
+- `next` removed from `peerDependencies` (now only needed by the React/`.` surface, not `./server`).
+
 ## [0.4.0] - 2026-06-15
 
 ### Fixed
