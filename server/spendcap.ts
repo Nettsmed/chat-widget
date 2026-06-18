@@ -31,7 +31,17 @@ export function __resetMemoryForTest(): void {
   mem.clear();
 }
 
-/** True if the tenant is under its daily token budget. Fails closed on error. */
+let _warnedNoRedis = false;
+
+/**
+ * True if the tenant is under its daily token budget. Fails closed on error.
+ *
+ * **Cross-instance enforcement requires Upstash/Redis.**
+ * Set `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` (or
+ * `KV_REST_API_URL` + `KV_REST_API_TOKEN`). Without Redis the cap is a
+ * per-instance best-effort floor — N serverless instances each enforce the
+ * full `dailyTokens` limit independently, so the effective cap is N×dailyTokens.
+ */
 export async function checkSpendCap(o: SpendCapOptions): Promise<boolean> {
   const key = dayKey(o);
   const r = getRedis();
@@ -43,6 +53,12 @@ export async function checkSpendCap(o: SpendCapOptions): Promise<boolean> {
       console.error("[spendcap] check failed (failing closed):", err);
       return false;
     }
+  }
+  if (!_warnedNoRedis) {
+    _warnedNoRedis = true;
+    console.warn(
+      "[spendcap] no Upstash/Redis configured — cap is per-instance best-effort only, not globally enforced",
+    );
   }
   return (mem.get(key) ?? 0) < o.dailyTokens;
 }

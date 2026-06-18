@@ -1,5 +1,6 @@
 import type { ToolSet, UIMessage } from "ai";
 import type { AccessContext } from "./access-context";
+import type { SpendCapOptions } from "./spendcap";
 
 export type RequestInfo = {
   messages: UIMessage[];
@@ -30,7 +31,7 @@ export type ChatHandlerConfig = {
   /** Per-tenant daily token budget. When set and exceeded, the handler returns
    *  the errorMessage instead of calling the model (protects against runaway
    *  cost / abuse). Omit to disable. */
-  spendCap?: { tenantKey: string; dailyTokens: number };
+  spendCap?: Omit<SpendCapOptions, "now">;
   /** Called on a stream/response error so the app can report it (e.g. Sentry).
    *  The package stays Sentry-agnostic; the app wires the reporter. */
   onStreamError?: (err: unknown) => void;

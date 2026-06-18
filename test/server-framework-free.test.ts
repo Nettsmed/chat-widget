@@ -7,7 +7,7 @@ describe("server surface is framework-agnostic", () => {
     for (const f of readdirSync(dir).filter((n) => n.endsWith(".ts"))) {
       const src = readFileSync(new URL(f, dir), "utf-8");
       expect(src, `${f} must not import next/*`).not.toMatch(/from ["']next\//);
-      expect(src, `${f} must not import react`).not.toMatch(/from ["']react["']/);
+      expect(src, `${f} must not import react`).not.toMatch(/from ["']react/);
     }
   });
 });
