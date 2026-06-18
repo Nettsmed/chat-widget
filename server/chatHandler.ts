@@ -1,8 +1,9 @@
-import { anthropic } from "@ai-sdk/anthropic";
 import { streamText, stepCountIs, convertToModelMessages, type UIMessage } from "ai";
 import { checkRateLimit, getClientIp } from "./ratelimit";
 import { logMessage } from "./turso";
 import { resolveAccessContext as defaultResolveAccessContext } from "./access-context";
+import { resolveAnthropicModel } from "./model";
+import { checkSpendCap, recordUsage } from "./spendcap";
 import type { ChatHandlerConfig } from "./types";
 
 type ChatRequestBody = {
@@ -77,6 +78,26 @@ export function createChatHandler(cfg: ChatHandlerConfig) {
       });
     }
 
+    // Per-tenant spend cap: short-circuit before any model call.
+    if (cfg.spendCap && !(await checkSpendCap(cfg.spendCap))) {
+      // Emit a minimal UI-message stream so the widget renders the error as an
+      // assistant turn. Each chunk: data: <JSON>\n\n, terminated with [DONE].
+      const id = "spend-cap-error";
+      const body =
+        `data: ${JSON.stringify({ type: "text-start", id })}\n\n` +
+        `data: ${JSON.stringify({ type: "text-delta", id, delta: cfg.errorMessage })}\n\n` +
+        `data: ${JSON.stringify({ type: "text-end", id })}\n\n` +
+        `data: [DONE]\n\n`;
+      return new Response(body, {
+        status: 200,
+        headers: {
+          "content-type": "text/event-stream",
+          "cache-control": "no-cache",
+          "x-vercel-ai-ui-message-stream": "v1",
+        },
+      });
+    }
+
     let modelMessages;
     try {
       modelMessages = await convertToModelMessages(messages);
@@ -101,7 +122,7 @@ export function createChatHandler(cfg: ChatHandlerConfig) {
     const systemPrompt = cfg.buildSystemPrompt(content, { url: pageUrl, title: pageTitle });
 
     const result = streamText({
-      model: anthropic(cfg.model),
+      model: resolveAnthropicModel(cfg.model, cfg.apiKey),
       // Cache the (large, stable) system prompt via a cache breakpoint on the
       // system message — top-level providerOptions does NOT cache the system
       // string. Cuts input tokens ~70% on repeat turns.
@@ -115,7 +136,10 @@ export function createChatHandler(cfg: ChatHandlerConfig) {
       ],
       stopWhen: stepCountIs(stepCount),
       tools,
-      onFinish: ({ text }) => {
+      onFinish: ({ text, totalUsage }) => {
+        if (cfg.spendCap && totalUsage?.totalTokens) {
+          recordUsage(cfg.spendCap, totalUsage.totalTokens);
+        }
         if (text && last) {
           logMessage({
             sessionId: sid,

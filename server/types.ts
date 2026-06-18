@@ -24,6 +24,13 @@ export type ChatHandlerConfig = {
   logIp?: boolean;
   /** User-facing fallback returned on a streaming error. */
   errorMessage: string;
+  /** Per-tenant Anthropic API key (BYOK). When omitted, the env-default
+   *  `ANTHROPIC_API_KEY` is used (Nettsmed-managed billing). */
+  apiKey?: string;
+  /** Per-tenant daily token budget. When set and exceeded, the handler returns
+   *  the errorMessage instead of calling the model (protects against runaway
+   *  cost / abuse). Omit to disable. */
+  spendCap?: { tenantKey: string; dailyTokens: number };
   /** Called on a stream/response error so the app can report it (e.g. Sentry).
    *  The package stays Sentry-agnostic; the app wires the reporter. */
   onStreamError?: (err: unknown) => void;
