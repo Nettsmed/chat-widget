@@ -1,5 +1,5 @@
 import { createClient, type Client } from "@libsql/client";
-import { after } from "next/server";
+import { runBackground } from "./scheduler";
 
 let client: Client | null = null;
 
@@ -33,7 +33,7 @@ export function logMessage(msg: LogMessage): void {
   const content = msg.content.slice(0, 20000);
   const withIp = msg.ip !== undefined && msg.ip !== null;
 
-  after(
+  runBackground(
     c
       .execute(
         withIp
@@ -62,7 +62,7 @@ function maybePurgeOld(c: Client): void {
   const now = Date.now();
   if (now - lastPurge < 3600_000) return;
   lastPurge = now;
-  after(
+  runBackground(
     c
       .execute(`DELETE FROM conversations WHERE created_at < datetime('now', '-${RETENTION_DAYS} days')`)
       .catch((err) => console.error("[turso] purge failed:", err.message ?? err)),
