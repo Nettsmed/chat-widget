@@ -56,6 +56,8 @@ describe("createChatHandler spend cap", () => {
     expect(res.status).toBe(200);
     const text = await res.text();
     expect(text).toContain("Tjenesten er midlertidig utilgjengelig.");
+    expect(text).toContain('"type":"start"');
+    expect(text).toContain('"type":"finish"');
     expect(streamText).not.toHaveBeenCalled();
   });
 });
