@@ -41,4 +41,18 @@ describe("widget.js page-context passthrough", () => {
     expect(src).not.toContain("&screen=");
     expect(src).not.toContain("&stack=");
   });
+
+  it("appends minside and email when provided", () => {
+    loadWidget({ base: "https://hjelp.nettsmed.no", minside: "1", email: "sf@nettsmed.no" });
+    const src = iframeSrc();
+    expect(src).toContain("&minside=1");
+    expect(src).toContain("&email=sf%40nettsmed.no");
+  });
+
+  it("omits minside and email when not provided (backward compatible)", () => {
+    loadWidget({ base: "https://hjelp.nettsmed.no" });
+    const src = iframeSrc();
+    expect(src).not.toContain("&minside=");
+    expect(src).not.toContain("&email=");
+  });
 });
