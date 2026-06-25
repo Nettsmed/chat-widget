@@ -34,6 +34,13 @@
   // surface screen-aware suggestions and weight answers. Absent → no-op.
   var SCREEN = attr("screen", "");
   var STACK = attr("stack", "");
+  // Optional "Min side" passthrough. When the host (a Nettsmed support-plugin
+  // with the minside-SSO bridge present) sets data-minside="1", the embed shows
+  // a Min side section in its top bar; data-email feeds the "Kontakt oss" link.
+  // The SSO launch itself is handled parent-side via postMessage — no token
+  // crosses the iframe. Absent → no-op.
+  var MINSIDE = attr("minside", "");
+  var EMAIL = attr("email", "");
 
   function injectStyles() {
     if (document.getElementById("nettsmed-chatbot-styles")) return;
@@ -109,6 +116,8 @@
     var embedSrc = base + "/embed?ctx=" + encodeURIComponent(window.location.href) + "&t=" + encodeURIComponent((document.title || "").slice(0, 200));
     if (SCREEN) embedSrc += "&screen=" + encodeURIComponent(SCREEN.slice(0, 120));
     if (STACK) embedSrc += "&stack=" + encodeURIComponent(STACK.slice(0, 120));
+    if (MINSIDE) embedSrc += "&minside=" + encodeURIComponent(MINSIDE.slice(0, 8));
+    if (EMAIL) embedSrc += "&email=" + encodeURIComponent(EMAIL.slice(0, 160));
     iframe.src = embedSrc;
     iframe.title = TITLE;
     iframe.setAttribute("allow", "clipboard-write");

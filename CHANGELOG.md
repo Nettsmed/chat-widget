@@ -4,6 +4,15 @@ All notable changes to `@nettsmed/chat-widget`. Format: Keep a Changelog + SemVe
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-25
+
+### Added
+- `widget.js` "Min side" passthrough: optional `data-minside` and `data-email`
+  attributes are forwarded to the embed iframe URL (`&minside=…&email=…`). Lets a
+  host with the minside-SSO bridge tell the embed to surface a Min side section
+  (the SSO launch is handled parent-side via postMessage — no token crosses the
+  iframe). Absent attributes are a no-op (backward compatible).
+
 ## [0.6.0] - 2026-06-25
 
 ### Added
