@@ -4,6 +4,16 @@ All notable changes to `@nettsmed/chat-widget`. Format: Keep a Changelog + SemVe
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-25
+
+### Added
+- `widget.js` page-context passthrough: optional `data-screen` and `data-stack`
+  attributes are forwarded to the embed iframe URL (`&screen=…&stack=…`). Lets a
+  host that knows where the user is — e.g. a WordPress plugin reporting the
+  current admin screen + active stack — drive screen-aware suggestions and
+  answer weighting in the embed. Absent attributes are a no-op (backward
+  compatible; existing consumers unaffected).
+
 ## [0.5.0] - 2026-06-18
 
 ### Added
