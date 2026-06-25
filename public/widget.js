@@ -28,6 +28,12 @@
   var ARIA = attr("aria", "Åpne chat");
   var TITLE = attr("title", "Chat");
   var GA_LABEL = attr("gaLabel", "chatbot");
+  // Optional page-context passthrough. When the host knows where the user is
+  // (e.g. a WP plugin reporting the current admin screen + active stack), it
+  // sets data-screen / data-stack; we forward them to the embed so it can
+  // surface screen-aware suggestions and weight answers. Absent → no-op.
+  var SCREEN = attr("screen", "");
+  var STACK = attr("stack", "");
 
   function injectStyles() {
     if (document.getElementById("nettsmed-chatbot-styles")) return;
@@ -100,7 +106,10 @@
     wrap.className = "nettsmed-chat-wrap";
 
     var iframe = document.createElement("iframe");
-    iframe.src = base + "/embed?ctx=" + encodeURIComponent(window.location.href) + "&t=" + encodeURIComponent((document.title || "").slice(0, 200));
+    var embedSrc = base + "/embed?ctx=" + encodeURIComponent(window.location.href) + "&t=" + encodeURIComponent((document.title || "").slice(0, 200));
+    if (SCREEN) embedSrc += "&screen=" + encodeURIComponent(SCREEN.slice(0, 120));
+    if (STACK) embedSrc += "&stack=" + encodeURIComponent(STACK.slice(0, 120));
+    iframe.src = embedSrc;
     iframe.title = TITLE;
     iframe.setAttribute("allow", "clipboard-write");
     // Register this iframe as the trusted source for the site-bridge (origin
