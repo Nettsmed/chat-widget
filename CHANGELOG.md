@@ -4,6 +4,24 @@ All notable changes to `@nettsmed/chat-widget`. Format: Keep a Changelog + SemVe
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-07-30
+
+### Fixed
+- **An Upstash outage no longer takes the chat endpoint down.** `checkRateLimit`
+  awaited `rl.limit()` unguarded, so an unreachable Redis (a deleted database
+  gives `getaddrinfo ENOTFOUND`) rejected the whole POST handler — every request
+  became a bare 500 with an empty body and the widget went silent. Upstash
+  failures now degrade to the existing in-memory limiter, which still enforces a
+  limit (the "never fails open" invariant is unchanged).
+- Upstash client retries lowered from the SDK default (5, exponential backoff) to
+  1, so a dead endpoint fails fast instead of adding seconds to every request.
+- A 60s circuit breaker trips after 2 consecutive Upstash failures, so a dead
+  Redis isn't re-dialed per request. One log line per outage window, not per
+  request.
+- `createChatHandler` wraps the pipeline: any unexpected throw is reported via
+  `onStreamError` and answered with the tenant's `errorMessage` as a normal
+  assistant turn, instead of a bare 500 the user sees as no response.
+
 ## [0.7.0] - 2026-06-25
 
 ### Added

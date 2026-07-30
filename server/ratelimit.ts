@@ -23,7 +23,10 @@ function getUpstash(limit: number, window: string, prefix: string): Ratelimit | 
   let rl: Ratelimit | null = null;
   if (url && token) {
     rl = new Ratelimit({
-      redis: new Redis({ url, token }),
+      // Fail fast: the SDK default (5 retries with exponential backoff) turns a
+      // dead endpoint into seconds of added latency on every request. One retry
+      // still absorbs a blip; anything worse falls through to the memory floor.
+      redis: new Redis({ url, token, retry: { retries: 1, backoff: () => 100 } }),
       limiter: Ratelimit.slidingWindow(limit, window as `${number} s`),
       analytics: false,
       prefix,
@@ -51,6 +54,21 @@ function memoryAllow(bucketKey: string, limit: number, windowMs: number): boolea
   return true;
 }
 
+// An Upstash outage must never take the chat endpoint down: a throw here used
+// to reject the whole POST handler, so the widget got a bare 500 and the user
+// got silence. On failure we degrade to the in-memory floor (still a limit —
+// the "never fails open" invariant holds) and trip a short circuit so a dead or
+// deleted Redis isn't re-dialed on every single request.
+const CIRCUIT_COOLDOWN_MS = 60_000;
+const CIRCUIT_TRIP_AFTER = 2;
+let consecutiveFailures = 0;
+let circuitOpenUntil = 0;
+
+export function __resetCircuitForTest(): void {
+  consecutiveFailures = 0;
+  circuitOpenUntil = 0;
+}
+
 /** Returns true if the request is allowed. Always enforces a limit (never fails open). */
 export async function checkRateLimit(ip: string, opts: RateLimitOptions = {}): Promise<boolean> {
   const limit = opts.limit ?? DEFAULT_LIMIT;
@@ -58,10 +76,22 @@ export async function checkRateLimit(ip: string, opts: RateLimitOptions = {}): P
   const prefix = opts.prefix ?? DEFAULT_PREFIX;
   const windowMs = (parseInt(window, 10) || 60) * 1000;
 
-  const rl = getUpstash(limit, window, prefix);
+  const rl = Date.now() < circuitOpenUntil ? null : getUpstash(limit, window, prefix);
   if (rl) {
-    const { success } = await rl.limit(ip);
-    return success;
+    try {
+      const { success } = await rl.limit(ip);
+      consecutiveFailures = 0;
+      return success;
+    } catch (err) {
+      consecutiveFailures++;
+      // One line per outage window, not per request.
+      if (consecutiveFailures === 1) {
+        console.error("[ratelimit] Upstash unreachable — degrading to in-memory limiter:", err);
+      }
+      if (consecutiveFailures >= CIRCUIT_TRIP_AFTER) {
+        circuitOpenUntil = Date.now() + CIRCUIT_COOLDOWN_MS;
+      }
+    }
   }
   return memoryAllow(`${prefix}:${ip}`, limit, windowMs);
 }
