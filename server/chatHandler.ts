@@ -24,6 +24,23 @@ function textFromMessage(m: UIMessage): string {
 }
 
 /**
+ * Emits a full UI-message stream carrying a single assistant text turn, so the
+ * widget renders `message` as a normal reply instead of showing nothing. Chunk
+ * order matches toUIMessageStreamResponse:
+ *   start -> text-start -> text-delta -> text-end -> finish -> [DONE]
+ */
+function uiTextStreamResponse(message: string, id: string): Response {
+  const body =
+    `data: ${JSON.stringify({ type: "start", messageId: id })}\n\n` +
+    `data: ${JSON.stringify({ type: "text-start", id })}\n\n` +
+    `data: ${JSON.stringify({ type: "text-delta", id, delta: message })}\n\n` +
+    `data: ${JSON.stringify({ type: "text-end", id })}\n\n` +
+    `data: ${JSON.stringify({ type: "finish", finishReason: "stop" })}\n\n` +
+    `data: [DONE]\n\n`;
+  return new Response(body, { status: 200, headers: UI_MESSAGE_STREAM_HEADERS });
+}
+
+/**
  * Builds the generic POST handler for the chat endpoint. Everything tenant-
  * specific (model, system prompt, content source, tools, access seam, copy,
  * limits) is injected via config; the pipeline (rate-limit -> abuse guards ->
@@ -36,7 +53,21 @@ export function createChatHandler(cfg: ChatHandlerConfig) {
   const stepCount = cfg.stepCount ?? 3;
   const resolveCtx = cfg.resolveAccessContext ?? defaultResolveAccessContext;
 
+  // Last line of defence: any unexpected throw (a dead Redis, a tenant
+  // `getTools`/`resolveAccessContext` blowing up) used to surface as a bare 500
+  // with an empty body — the widget just sat there. Report it, then answer with
+  // the tenant's error copy so the user always sees *something*.
   return async function POST(req: Request): Promise<Response> {
+    try {
+      return await handle(req);
+    } catch (err) {
+      console.error("[chat] unhandled handler failure:", err);
+      cfg.onStreamError?.(err);
+      return uiTextStreamResponse(cfg.errorMessage, "chat-handler-error");
+    }
+  };
+
+  async function handle(req: Request): Promise<Response> {
     const ip = getClientIp(req);
     if (!(await checkRateLimit(ip, cfg.rateLimit))) {
       return new Response("Rate limit exceeded", { status: 429 });
@@ -80,21 +111,7 @@ export function createChatHandler(cfg: ChatHandlerConfig) {
 
     // Per-tenant spend cap: short-circuit before any model call.
     if (cfg.spendCap && !(await checkSpendCap(cfg.spendCap))) {
-      // Emit a full UI-message stream so the widget renders the error as a
-      // normal assistant turn. Chunk order matches toUIMessageStreamResponse:
-      //   start -> text-start -> text-delta -> text-end -> finish -> [DONE]
-      const id = "spend-cap-error";
-      const body =
-        `data: ${JSON.stringify({ type: "start", messageId: id })}\n\n` +
-        `data: ${JSON.stringify({ type: "text-start", id })}\n\n` +
-        `data: ${JSON.stringify({ type: "text-delta", id, delta: cfg.errorMessage })}\n\n` +
-        `data: ${JSON.stringify({ type: "text-end", id })}\n\n` +
-        `data: ${JSON.stringify({ type: "finish", finishReason: "stop" })}\n\n` +
-        `data: [DONE]\n\n`;
-      return new Response(body, {
-        status: 200,
-        headers: UI_MESSAGE_STREAM_HEADERS,
-      });
+      return uiTextStreamResponse(cfg.errorMessage, "spend-cap-error");
     }
 
     let modelMessages;
@@ -164,5 +181,5 @@ export function createChatHandler(cfg: ChatHandlerConfig) {
         return cfg.errorMessage;
       },
     });
-  };
+  }
 }
