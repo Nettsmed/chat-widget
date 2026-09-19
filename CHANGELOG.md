@@ -4,6 +4,11 @@ All notable changes to `@nettsmed/chat-widget`. Format: Keep a Changelog + SemVe
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-09-19
+
+### Fixed
+- **The transcript follows a streaming answer only while the reader is near the bottom.** `ChatWidget` used to `scrollTo({ behavior: "smooth" })` on every message/status change, which fought itself mid-stream and yanked the viewport back if you scrolled up. Following is now instant and sticky (`src/scrollStickiness.ts`, wired to `scrollRef`). Scrolling up pauses it; «Hopp til siste» or returning near the bottom resumes it. A finished stream does not scroll you if you are mid-thread.
+
 ## [0.7.1] - 2026-07-30
 
 ### Fixed
