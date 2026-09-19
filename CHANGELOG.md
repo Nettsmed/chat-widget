@@ -4,6 +4,12 @@ All notable changes to `@nettsmed/chat-widget`. Format: Keep a Changelog + SemVe
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-09-19
+
+### Added
+- **«Søker …» while Jev routes to semantic search.** The transcript shows a live status for the in-flight turn when the chat Response carries `X-Jev-Route: semantic_search` — «Søker på nettsmed.no …» if the parent page host is nettsmed.no, otherwise «Søker …». Optional `ChatWidgetConfig.searchingLabel` overrides either line. The status sits in the same scroll container as the typing dots and clears when assistant text arrives or the stream finishes.
+- `prompt_only`, `ask_clarify`, `off`, `error_fallback`, and an unknown route keep the existing typing dots («Skriver svar…»). The widget does not guess a search. `X-Jev-Route` is read from the Response as soon as `fetch` resolves (before the body is consumed). If that header is missing, a `data-jev-route` stream part (`{ route }` or a route string) is accepted instead.
+
 ## [0.7.3] - 2026-09-19
 
 ### Fixed

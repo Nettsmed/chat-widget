@@ -24,6 +24,15 @@ import {
   type ScrollBox,
   type StickRuntime,
 } from "./scrollStickiness";
+import {
+  isSilentAssistantPlaceholder,
+  readJevRouteDataPart,
+  readJevRouteHeader,
+  transcriptWait,
+  waitingRowVisible,
+  type JevRoute,
+  type WaitingMessage,
+} from "./jevRoute";
 import { createBridgeClient } from "./siteBridgeClient";
 import type { ChatWidgetConfig } from "./types";
 
@@ -66,6 +75,8 @@ export function ChatWidget({
   const [input, setInput] = useState("");
   const [hydrated, setHydrated] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  /** Jev route for the in-flight turn. Null until the response says so — never guessed. */
+  const [jevRoute, setJevRoute] = useState<JevRoute | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -117,6 +128,14 @@ export function ChatWidget({
   const { messages, sendMessage, status, setMessages, regenerate } = useChat({
     transport: new DefaultChatTransport({
       api: config.apiPath ?? "/api/chat",
+      // Headers are available when fetch resolves, before the SDK reads the
+      // body. useChat itself does not expose them.
+      fetch: async (input, init) => {
+        const response = await globalThis.fetch(input, init);
+        const route = readJevRouteHeader(response.headers);
+        if (route) setJevRoute(route);
+        return response;
+      },
       body: () => {
         const p =
           typeof window !== "undefined"
@@ -130,6 +149,10 @@ export function ChatWidget({
         };
       },
     }),
+    onData: (part) => {
+      const route = readJevRouteDataPart(part);
+      if (route) setJevRoute(route);
+    },
     onError: (error) => {
       console.error("[chat] error:", error);
       setErrorMsg(config.errorMessage);
@@ -377,6 +400,19 @@ export function ChatWidget({
     armGestureSettle(el);
   };
 
+  const wait = transcriptWait({
+    status,
+    messages: messages as WaitingMessage[],
+    signaledRoute: jevRoute,
+    parentHost,
+    searchingLabel: config.searchingLabel,
+  });
+  const showWaitingRow = waitingRowVisible(messages as WaitingMessage[], wait);
+  const hideTrailingPlaceholder =
+    showWaitingRow && isSilentAssistantPlaceholder(messages[messages.length - 1] as WaitingMessage | undefined);
+  const renderedMessages = hideTrailingPlaceholder ? messages.slice(0, -1) : messages;
+  const waitingFollowKey = showWaitingRow ? (wait.show && wait.kind === "searching" ? wait.label : "dots") : "";
+
   // Stick while near the bottom; pause when the user scrolls up. Same container
   // in the embed/mobile sheet and the desktop panel (`scrollRef` — flex
   // min-h-0 overflow-y-scroll inside the h-screen embed column).
@@ -479,8 +515,10 @@ export function ChatWidget({
     panelOpenRef.current = open;
     if (!el) return;
     followIfStuck(el);
+    // `waitingFollowKey` is the «Søker …» / dots row. Same stickiness rules as
+    // message growth: follow only while stuck, never a new scroll container.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages, status, isOpen, embed]);
+  }, [messages, status, isOpen, embed, waitingFollowKey]);
 
   // Token growth can mutate message parts in place (no new `messages`
   // identity) and images/markdown can reflow after commit. The content box
@@ -538,6 +576,7 @@ export function ChatWidget({
     e.preventDefault();
     if (!input.trim() || isStreaming) return;
     setErrorMsg(null);
+    setJevRoute(null);
     resumeStickiness();
     sendMessage({ text: input });
     postToParent({ type: "nettsmed-chat-event", event: "chatbot_message" });
@@ -562,6 +601,7 @@ export function ChatWidget({
 
   const handleRetry = () => {
     setErrorMsg(null);
+    setJevRoute(null);
     resumeStickiness();
     regenerate();
   };
@@ -594,6 +634,7 @@ export function ChatWidget({
   const handleQuickPrompt = (text: string) => {
     if (isStreaming) return;
     setErrorMsg(null);
+    setJevRoute(null);
     resumeStickiness();
     sendMessage({ text });
     postToParent({ type: "nettsmed-chat-event", event: "chatbot_message" });
@@ -720,7 +761,7 @@ export function ChatWidget({
               </>
             )}
 
-            {messages.map((m) => (
+            {renderedMessages.map((m) => (
               <div
                 key={m.id}
                 className={`flex gap-2.5 animate-[messageIn_0.3s_ease-out] ${
@@ -825,19 +866,26 @@ export function ChatWidget({
               </div>
             ))}
 
-            {isStreaming &&
-              messages[messages.length - 1]?.role === "user" && (
+            {showWaitingRow && (
                 <div className="flex gap-2.5 animate-[messageIn_0.3s_ease-out]">
                   <div className="flex-shrink-0 w-8 h-8 bg-[var(--cw-primary-hover)] text-white rounded-full flex items-center justify-center text-[12px] font-semibold mt-0.5">
                     {config.avatarLetter}
                   </div>
                   <div className="bg-white rounded-[10px] rounded-tl-[4px] px-3.5 py-3.5 border border-[var(--cw-border)]/60">
-                    <span className="cw-sr-only">Skriver svar…</span>
-                    <span className="flex gap-1.5 items-center" aria-hidden="true">
-                      <span className="w-1.5 h-1.5 bg-[var(--cw-primary-hover)] rounded-full animate-[dot_1.2s_ease-in-out_infinite]"></span>
-                      <span className="w-1.5 h-1.5 bg-[var(--cw-primary-hover)] rounded-full animate-[dot_1.2s_ease-in-out_infinite] [animation-delay:0.15s]"></span>
-                      <span className="w-1.5 h-1.5 bg-[var(--cw-primary-hover)] rounded-full animate-[dot_1.2s_ease-in-out_infinite] [animation-delay:0.3s]"></span>
-                    </span>
+                    {wait.show && wait.kind === "searching" ? (
+                      <span role="status" className="text-[13px] leading-[1.45] text-[var(--cw-primary)]">
+                        {wait.label}
+                      </span>
+                    ) : (
+                      <>
+                        <span className="cw-sr-only">{wait.show ? wait.srLabel : "Skriver svar…"}</span>
+                        <span className="flex gap-1.5 items-center" aria-hidden="true">
+                          <span className="w-1.5 h-1.5 bg-[var(--cw-primary-hover)] rounded-full animate-[dot_1.2s_ease-in-out_infinite]"></span>
+                          <span className="w-1.5 h-1.5 bg-[var(--cw-primary-hover)] rounded-full animate-[dot_1.2s_ease-in-out_infinite] [animation-delay:0.15s]"></span>
+                          <span className="w-1.5 h-1.5 bg-[var(--cw-primary-hover)] rounded-full animate-[dot_1.2s_ease-in-out_infinite] [animation-delay:0.3s]"></span>
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
               )}
