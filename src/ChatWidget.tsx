@@ -5,12 +5,24 @@ import { DefaultChatTransport, type UIMessage } from "ai";
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import { MessageText } from "./MessageText";
 import {
-  isNearBottom,
-  nextStickToBottom,
+  PROGRAMMATIC_PIN_MIN_FRAMES,
+  beginProgrammaticPin,
+  createStickRuntime,
+  distanceFromBottom,
+  endProgrammaticPin,
+  notePointerDelta,
+  notePointerDown,
+  notePointerUp,
+  noteWheel,
+  onTranscriptScroll,
+  programmaticPinStep,
   scrollBehaviorFor,
+  settleUserGesture,
   shouldFollowContent,
   shouldShowJumpToLatest,
+  stickForSendOrJump,
   type ScrollBox,
+  type StickRuntime,
 } from "./scrollStickiness";
 import { createBridgeClient } from "./siteBridgeClient";
 import type { ChatWidgetConfig } from "./types";
@@ -58,16 +70,19 @@ export function ChatWidget({
   const contentRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   /** Follow the latest token. False after the user scrolls up past the threshold. */
-  const stickToBottomRef = useRef(true);
-  /** Scroll events caused by our own pin must not clear stickiness. */
-  const ignoreScrollRef = useRef(false);
-  /** True only while a smooth «Hopp til siste» animation is in flight. */
-  const smoothLockRef = useRef(false);
+  const stickRef = useRef<StickRuntime>(createStickRuntime());
+  /** Last scroll box we observed, so a leaked programmatic event can be told from a scroll-up. */
+  const lastScrollBoxRef = useRef<ScrollBox | null>(null);
   /** Bumps so a late scrollend from an older jump cannot unlock a newer one. */
   const smoothGenRef = useRef(0);
   const scrollUnlockTimer = useRef<number | null>(null);
-  /** Pointer/touch is down on the transcript — don't fight the gesture. */
-  const userScrollingRef = useRef(false);
+  /** True only while a smooth «Hopp til siste» animation is in flight. */
+  const smoothLockRef = useRef(false);
+  const activePointerRef = useRef<{ id: number; y: number } | null>(null);
+  const gestureTokenRef = useRef(0);
+  const gestureTimerRef = useRef<number | null>(null);
+  const gestureEndRef = useRef<(() => void) | null>(null);
+  const detachPinScrollEndRef = useRef<(() => void) | null>(null);
   const panelOpenRef = useRef(false);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
 
@@ -182,34 +197,107 @@ export function ChatWidget({
     setShowJumpToLatest((prev) => (prev === show ? prev : show));
   };
 
+  const clearPinTimer = () => {
+    if (scrollUnlockTimer.current != null) {
+      clearTimeout(scrollUnlockTimer.current);
+      scrollUnlockTimer.current = null;
+    }
+  };
+
   const pinToBottom = (el: HTMLElement, intent: "follow" | "jump") => {
     const behavior = scrollBehaviorFor(
       intent,
       window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false,
     );
     const gen = ++smoothGenRef.current;
-    if (scrollUnlockTimer.current != null) {
-      clearTimeout(scrollUnlockTimer.current);
-      scrollUnlockTimer.current = null;
-    }
-    ignoreScrollRef.current = true;
+    clearPinTimer();
+    detachPinScrollEndRef.current?.();
+    detachPinScrollEndRef.current = null;
+    stickRef.current = beginProgrammaticPin(stickRef.current);
     if (behavior === "auto") {
       // Instant. `behavior: "smooth"` on every token fights itself mid-stream.
+      // Keep the ignore window open across the async `scroll` event: WebKit
+      // and mobile Chromium can dispatch it after this function returns, while
+      // scrollHeight has already grown. Releasing early flips stickToBottom off
+      // for the rest of the stream.
       smoothLockRef.current = false;
       el.scrollTop = el.scrollHeight;
-      ignoreScrollRef.current = false;
+      lastScrollBoxRef.current = scrollBox(el);
+      let frames = 0;
+      let repins = 0;
+      let detachScrollEnd = () => {};
+      const release = () => {
+        detachScrollEnd();
+        detachScrollEnd = () => {};
+        if (smoothGenRef.current !== gen) return;
+        smoothGenRef.current += 1;
+        stickRef.current = endProgrammaticPin(stickRef.current);
+        clearPinTimer();
+        lastScrollBoxRef.current = scrollBox(el);
+      };
+      const tick = () => {
+        if (smoothGenRef.current !== gen) return;
+        if (stickRef.current.userScrollIntent) {
+          release();
+          return;
+        }
+        frames += 1;
+        const action = programmaticPinStep(distanceFromBottom(scrollBox(el)), frames);
+        if (action === "hold") {
+          requestAnimationFrame(tick);
+          return;
+        }
+        if (action === "repin" && repins < 3) {
+          repins += 1;
+          frames = 0;
+          el.scrollTop = el.scrollHeight;
+          lastScrollBoxRef.current = scrollBox(el);
+          requestAnimationFrame(tick);
+          return;
+        }
+        release();
+      };
+      const onScrollEnd = () => {
+        if (smoothGenRef.current !== gen) return;
+        // A scrollend in the same turn as `scrollTop =` must not close the
+        // window; the async scroll listener still has to run under ignore.
+        if (frames < PROGRAMMATIC_PIN_MIN_FRAMES) return;
+        tick();
+      };
+      detachScrollEnd = () => {
+        el.removeEventListener("scrollend", onScrollEnd);
+        if (detachPinScrollEndRef.current === detachScrollEnd) detachPinScrollEndRef.current = null;
+      };
+      detachPinScrollEndRef.current = detachScrollEnd;
+      el.addEventListener("scrollend", onScrollEnd);
+      requestAnimationFrame(tick);
+      // Cap so a throttled rAF cannot leave user scrolls ignored.
+      scrollUnlockTimer.current = window.setTimeout(() => {
+        if (smoothGenRef.current !== gen) return;
+        if (!stickRef.current.userScrollIntent && distanceFromBottom(scrollBox(el)) > 1 && repins < 3) {
+          repins += 1;
+          el.scrollTop = el.scrollHeight;
+          lastScrollBoxRef.current = scrollBox(el);
+        }
+        release();
+      }, 200);
       return;
     }
     smoothLockRef.current = true;
     el.scrollTo({ top: el.scrollHeight, behavior });
+    lastScrollBoxRef.current = scrollBox(el);
     const unlock = () => {
+      detachPinScrollEndRef.current?.();
+      detachPinScrollEndRef.current = null;
       if (smoothGenRef.current !== gen) return;
-      ignoreScrollRef.current = false;
+      stickRef.current = endProgrammaticPin(stickRef.current);
       smoothLockRef.current = false;
-      if (scrollUnlockTimer.current != null) {
-        clearTimeout(scrollUnlockTimer.current);
-        scrollUnlockTimer.current = null;
-      }
+      clearPinTimer();
+      lastScrollBoxRef.current = scrollBox(el);
+    };
+    detachPinScrollEndRef.current = () => {
+      el.removeEventListener("scrollend", unlock);
+      detachPinScrollEndRef.current = null;
     };
     el.addEventListener("scrollend", unlock, { once: true });
     scrollUnlockTimer.current = window.setTimeout(unlock, 1000);
@@ -219,23 +307,18 @@ export function ChatWidget({
     if (!smoothLockRef.current) return;
     smoothGenRef.current += 1;
     smoothLockRef.current = false;
-    ignoreScrollRef.current = false;
-    if (scrollUnlockTimer.current != null) {
-      clearTimeout(scrollUnlockTimer.current);
-      scrollUnlockTimer.current = null;
-    }
+    stickRef.current = endProgrammaticPin(stickRef.current);
+    clearPinTimer();
+    detachPinScrollEndRef.current?.();
+    detachPinScrollEndRef.current = null;
     // Re-assigning scrollTop aborts an in-flight smooth scrollTo.
     const top = el.scrollTop;
     el.scrollTop = top;
+    lastScrollBoxRef.current = scrollBox(el);
   };
 
   const followIfStuck = (el: HTMLElement) => {
-    if (
-      !shouldFollowContent({
-        stickToBottom: stickToBottomRef.current,
-        userIsScrolling: userScrollingRef.current,
-      })
-    ) {
+    if (!shouldFollowContent(stickRef.current)) {
       syncJumpChip(scrollBox(el));
       return;
     }
@@ -244,61 +327,142 @@ export function ChatWidget({
   };
 
   const resumeStickiness = () => {
-    stickToBottomRef.current = nextStickToBottom(stickToBottomRef.current, { type: "send" });
-    userScrollingRef.current = false;
+    smoothGenRef.current += 1;
+    stickRef.current = stickForSendOrJump(stickRef.current);
     setShowJumpToLatest(false);
   };
 
+  const armGestureSettle = (el: HTMLElement) => {
+    if (gestureTimerRef.current != null) {
+      clearTimeout(gestureTimerRef.current);
+      gestureTimerRef.current = null;
+    }
+    if (gestureEndRef.current) {
+      el.removeEventListener("scrollend", gestureEndRef.current);
+      gestureEndRef.current = null;
+    }
+    const token = ++gestureTokenRef.current;
+    const finish = () => {
+      if (gestureTokenRef.current !== token) return;
+      gestureTokenRef.current += 1;
+      if (gestureEndRef.current) {
+        el.removeEventListener("scrollend", gestureEndRef.current);
+        gestureEndRef.current = null;
+      }
+      if (gestureTimerRef.current != null) {
+        clearTimeout(gestureTimerRef.current);
+        gestureTimerRef.current = null;
+      }
+      stickRef.current = settleUserGesture(stickRef.current);
+      if (shouldFollowContent(stickRef.current)) pinToBottom(el, "follow");
+      syncJumpChip(scrollBox(el));
+    };
+    const onEnd = () => finish();
+    gestureEndRef.current = onEnd;
+    el.addEventListener("scrollend", onEnd);
+    // scrollend is the fast path; the timer covers a lost pointerup and
+    // browsers that never fire scrollend. Reset on every user scroll event.
+    gestureTimerRef.current = window.setTimeout(finish, 500);
+  };
+
+  const markUserScroll = (el: HTMLElement, next: StickRuntime) => {
+    const started = next.userScrollIntent && !stickRef.current.userScrollIntent;
+    stickRef.current = next;
+    if (!next.userScrollIntent) return;
+    if (started) {
+      smoothGenRef.current += 1;
+      stickRef.current = endProgrammaticPin(stickRef.current);
+      cancelSmoothScroll(el);
+    }
+    armGestureSettle(el);
+  };
+
   // Stick while near the bottom; pause when the user scrolls up. Same container
-  // in the embed/mobile sheet and the desktop panel (`scrollRef`).
+  // in the embed/mobile sheet and the desktop panel (`scrollRef` — flex
+  // min-h-0 overflow-y-scroll inside the h-screen embed column).
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
 
     const onScroll = () => {
-      if (ignoreScrollRef.current) return;
       const box = scrollBox(el);
-      stickToBottomRef.current = nextStickToBottom(stickToBottomRef.current, {
-        type: "scroll",
-        box,
-      });
-      syncJumpChip(box);
+      const next = onTranscriptScroll(stickRef.current, box, lastScrollBoxRef.current);
+      lastScrollBoxRef.current = box;
+      markUserScroll(el, next);
+      if (next.userScrollIntent || !next.ignoreProgrammaticScroll) syncJumpChip(box);
     };
 
-    const onGestureStart = () => {
-      userScrollingRef.current = true;
-      cancelSmoothScroll(el);
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      activePointerRef.current = { id: e.pointerId, y: e.clientY };
+      stickRef.current = notePointerDown(stickRef.current);
     };
 
-    const onWheel = () => {
-      cancelSmoothScroll(el);
+    const onPointerMove = (e: PointerEvent) => {
+      const active = activePointerRef.current;
+      if (!active || e.pointerId !== active.id) return;
+      markUserScroll(el, notePointerDelta(stickRef.current, e.clientY - active.y));
     };
 
-    const onGestureEnd = () => {
-      userScrollingRef.current = false;
-      const box = scrollBox(el);
-      stickToBottomRef.current = nextStickToBottom(stickToBottomRef.current, {
-        type: "scroll",
-        box,
-      });
-      if (stickToBottomRef.current) pinToBottom(el, "follow");
-      syncJumpChip(scrollBox(el));
+    const onPointerUp = (e: PointerEvent) => {
+      const active = activePointerRef.current;
+      if (active && e.pointerId !== active.id) return;
+      activePointerRef.current = null;
+      stickRef.current = notePointerUp(stickRef.current);
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      markUserScroll(el, noteWheel(stickRef.current, e.deltaY));
+    };
+
+    // Touch path as well as pointer: iOS can take over scrolling after the
+    // first touchmove and not deliver pointermove for the rest of the drag.
+    let touchStartY: number | null = null;
+    const onTouchStart = (e: TouchEvent) => {
+      touchStartY = e.touches[0]?.clientY ?? null;
+      stickRef.current = notePointerDown(stickRef.current);
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      const y = e.touches[0]?.clientY;
+      if (y == null || touchStartY == null) return;
+      markUserScroll(el, notePointerDelta(stickRef.current, y - touchStartY));
+    };
+    const onTouchEnd = () => {
+      touchStartY = null;
+      stickRef.current = notePointerUp(stickRef.current);
     };
 
     el.addEventListener("scroll", onScroll, { passive: true });
-    el.addEventListener("pointerdown", onGestureStart);
-    el.addEventListener("pointerup", onGestureEnd);
-    el.addEventListener("pointercancel", onGestureEnd);
+    el.addEventListener("pointerdown", onPointerDown);
     el.addEventListener("wheel", onWheel, { passive: true });
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: true });
+    el.addEventListener("touchend", onTouchEnd);
+    el.addEventListener("touchcancel", onTouchEnd);
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
     return () => {
       el.removeEventListener("scroll", onScroll);
-      el.removeEventListener("pointerdown", onGestureStart);
-      el.removeEventListener("pointerup", onGestureEnd);
-      el.removeEventListener("pointercancel", onGestureEnd);
+      el.removeEventListener("pointerdown", onPointerDown);
       el.removeEventListener("wheel", onWheel);
-      if (scrollUnlockTimer.current != null) {
-        clearTimeout(scrollUnlockTimer.current);
-        scrollUnlockTimer.current = null;
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+      el.removeEventListener("touchcancel", onTouchEnd);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+      clearPinTimer();
+      detachPinScrollEndRef.current?.();
+      detachPinScrollEndRef.current = null;
+      if (gestureTimerRef.current != null) {
+        clearTimeout(gestureTimerRef.current);
+        gestureTimerRef.current = null;
+      }
+      if (gestureEndRef.current) {
+        el.removeEventListener("scrollend", gestureEndRef.current);
+        gestureEndRef.current = null;
       }
     };
     // Rebind when the panel mounts the transcript.
@@ -309,8 +473,8 @@ export function ChatWidget({
     const el = scrollRef.current;
     const open = isOpen || embed;
     if (open && !panelOpenRef.current) {
-      stickToBottomRef.current = true;
-      userScrollingRef.current = false;
+      stickRef.current = createStickRuntime();
+      lastScrollBoxRef.current = null;
     }
     panelOpenRef.current = open;
     if (!el) return;
@@ -318,13 +482,16 @@ export function ChatWidget({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, status, isOpen, embed]);
 
-  // Markdown/images can grow after the message state settles.
+  // Token growth can mutate message parts in place (no new `messages`
+  // identity) and images/markdown can reflow after commit. The content box
+  // and the scrollport itself (mobile keyboard) both re-trigger follow.
   useEffect(() => {
     const content = contentRef.current;
     const el = scrollRef.current;
     if (!content || !el || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => followIfStuck(el));
     observer.observe(content);
+    observer.observe(el);
     return () => observer.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, embed]);
@@ -332,8 +499,8 @@ export function ChatWidget({
   const jumpToLatest = () => {
     const el = scrollRef.current;
     if (!el) return;
-    stickToBottomRef.current = nextStickToBottom(stickToBottomRef.current, { type: "jump" });
-    userScrollingRef.current = false;
+    smoothGenRef.current += 1;
+    stickRef.current = stickForSendOrJump(stickRef.current);
     setShowJumpToLatest(false);
     pinToBottom(el, "jump");
   };

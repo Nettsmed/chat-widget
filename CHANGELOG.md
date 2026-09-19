@@ -4,6 +4,12 @@ All notable changes to `@nettsmed/chat-widget`. Format: Keep a Changelog + SemVe
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-09-19
+
+### Fixed
+- **Streaming follow no longer dies on the first pin.** Instant `pinToBottom` cleared its ignore flag before Safari and mobile Chrome delivered the `scroll` event from `scrollTop = scrollHeight`. That event saw a mid-update box and set `stickToBottom` false, so `followIfStuck` no-oped for the rest of the stream (`src/scrollStickiness.ts`, wired in `ChatWidget`). Programmatic scroll events cannot clear stickiness: the ignore window stays up for two frames (then re-pins if the scrollport is not settled, with `scrollend` and a short cap), and a scroll with no user gesture is ignored even if that window already closed.
+- A bare `pointerdown` on the transcript no longer pauses follow. Only a wheel or pointer/touch movement does. A lost `pointerup` cannot leave follow paused — the gesture settles on `scrollend` or a short timeout, without treating tokens that arrived during a tap as a scroll-up.
+
 ## [0.7.2] - 2026-09-19
 
 ### Fixed

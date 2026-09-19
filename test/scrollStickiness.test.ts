@@ -1,12 +1,24 @@
 import { describe, expect, it } from "vitest";
 import {
+  GESTURE_MOVE_PX,
   NEAR_BOTTOM_THRESHOLD_PX,
+  PROGRAMMATIC_PIN_MIN_FRAMES,
+  beginProgrammaticPin,
+  createStickRuntime,
   distanceFromBottom,
+  endProgrammaticPin,
   isNearBottom,
   nextStickToBottom,
+  notePointerDelta,
+  notePointerDown,
+  noteWheel,
+  onTranscriptScroll,
+  programmaticPinStep,
   scrollBehaviorFor,
+  settleUserGesture,
   shouldFollowContent,
   shouldShowJumpToLatest,
+  stickForSendOrJump,
   type ScrollBox,
 } from "../src/scrollStickiness";
 
@@ -72,5 +84,101 @@ describe("scroll stickiness", () => {
     expect(scrollBehaviorFor("jump")).toBe("smooth");
     expect(scrollBehaviorFor("jump", true)).toBe("auto");
     expect(scrollBehaviorFor("follow", true)).toBe("auto");
+  });
+
+  it("keeps the programmatic-pin ignore window open for two frames, then until settled", () => {
+    expect(PROGRAMMATIC_PIN_MIN_FRAMES).toBe(2);
+    expect(programmaticPinStep(0, 0)).toBe("hold");
+    expect(programmaticPinStep(0, 1)).toBe("hold");
+    expect(programmaticPinStep(0, 2)).toBe("release");
+    expect(programmaticPinStep(40, 2)).toBe("repin");
+    expect(programmaticPinStep(1, 2)).toBe("release");
+  });
+
+  it("does not let a programmatic pin clear stickToBottom", () => {
+    let s = beginProgrammaticPin(createStickRuntime());
+    const atBottom = atDistance(0);
+    // Async scroll event, box still mid-update / not yet at the bottom.
+    s = onTranscriptScroll(s, atDistance(400), atBottom);
+    expect(s.stickToBottom).toBe(true);
+    expect(s.ignoreProgrammaticScroll).toBe(true);
+    expect(shouldFollowContent(s)).toBe(true);
+
+    // Ignore window already closed (the 0.7.2 bug). A leaked event whose
+    // scrollTop has not caught up, with no user gesture, still must not pause.
+    s = endProgrammaticPin(s);
+    const caughtUp = box(1500, 2000, 500);
+    const grown = box(1500, 2800, 500);
+    s = onTranscriptScroll(s, grown, caughtUp);
+    expect(distanceFromBottom(grown)).toBeGreaterThan(NEAR_BOTTOM_THRESHOLD_PX);
+    expect(s.stickToBottom).toBe(true);
+    expect(shouldFollowContent(s)).toBe(true);
+
+    // Same leak, but scrollTop looks lower because we stored the pin target
+    // before the event landed. Still not a user scroll.
+    s = onTranscriptScroll(s, box(900, 2800, 500), caughtUp);
+    expect(s.stickToBottom).toBe(true);
+  });
+
+  it("does not pause follow on pointerdown without scroll movement", () => {
+    let s = notePointerDown(createStickRuntime());
+    expect(s.pointerIsDown).toBe(true);
+    expect(s.userIsScrolling).toBe(false);
+    expect(shouldFollowContent(s)).toBe(true);
+    s = notePointerDelta(s, GESTURE_MOVE_PX - 1);
+    expect(s.userIsScrolling).toBe(false);
+    s = onTranscriptScroll(s, atDistance(400), atDistance(0));
+    expect(s.stickToBottom).toBe(true);
+    expect(shouldFollowContent(s)).toBe(true);
+  });
+
+  it("clears stickToBottom when the user scrolls up", () => {
+    let s = noteWheel(createStickRuntime(), -40);
+    expect(shouldFollowContent(s)).toBe(false);
+    s = onTranscriptScroll(s, atDistance(400), atDistance(0));
+    expect(s.stickToBottom).toBe(false);
+    expect(shouldShowJumpToLatest(atDistance(400))).toBe(true);
+
+    // Movement, not a bare pointerdown, is what counts as a drag.
+    let dragged = notePointerDown(createStickRuntime());
+    dragged = notePointerDelta(dragged, GESTURE_MOVE_PX);
+    dragged = onTranscriptScroll(dragged, atDistance(400), atDistance(0));
+    expect(dragged.stickToBottom).toBe(false);
+  });
+
+  it("resumes follow near the bottom and from the jump chip", () => {
+    let s = noteWheel(createStickRuntime(), -40);
+    s = onTranscriptScroll(s, atDistance(400), atDistance(0));
+    expect(s.stickToBottom).toBe(false);
+
+    s = onTranscriptScroll(s, atDistance(20), atDistance(400));
+    expect(isNearBottom(atDistance(20))).toBe(true);
+    expect(s.stickToBottom).toBe(true);
+    s = settleUserGesture(s);
+    expect(s.userIsScrolling).toBe(false);
+    expect(shouldFollowContent(s)).toBe(true);
+
+    s = noteWheel(s, -20);
+    s = onTranscriptScroll(s, atDistance(400), atDistance(20));
+    s = settleUserGesture(s);
+    expect(shouldFollowContent(s)).toBe(false);
+    expect(shouldShowJumpToLatest(atDistance(400))).toBe(true);
+
+    s = stickForSendOrJump(s);
+    expect(s.stickToBottom).toBe(true);
+    expect(s.userIsScrolling).toBe(false);
+    expect(shouldFollowContent(s)).toBe(true);
+    expect(shouldShowJumpToLatest(atDistance(0))).toBe(false);
+  });
+
+  it("settles a gesture without pointerup so a lost pointerup cannot pause follow forever", () => {
+    let s = notePointerDelta(notePointerDown(createStickRuntime()), 24);
+    expect(shouldFollowContent(s)).toBe(false);
+    // No pointerup. Scrollport still near the bottom (the drag didn't leave it).
+    s = settleUserGesture(s);
+    expect(s.userIsScrolling).toBe(false);
+    expect(s.userScrollIntent).toBe(false);
+    expect(s.stickToBottom).toBe(true);
+    expect(shouldFollowContent(s)).toBe(true);
   });
 });
