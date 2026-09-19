@@ -50,4 +50,10 @@ export type ChatWidgetConfig = {
   // behavior
   apiPath?: string; // default "/api/chat"
   linkTarget?: "_blank" | "_top"; // default "_blank"
+  /**
+   * Copy while `X-Jev-Route` is `semantic_search` and no assistant text has
+   * arrived yet. Default: «Søker på nettsmed.no …» when the parent page host
+   * is nettsmed.no, otherwise «Søker …». Other routes keep the typing dots.
+   */
+  searchingLabel?: string;
 };
