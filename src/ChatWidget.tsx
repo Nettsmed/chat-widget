@@ -2,8 +2,16 @@
 
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import { MessageText } from "./MessageText";
+import {
+  isNearBottom,
+  nextStickToBottom,
+  scrollBehaviorFor,
+  shouldFollowContent,
+  shouldShowJumpToLatest,
+  type ScrollBox,
+} from "./scrollStickiness";
 import { createBridgeClient } from "./siteBridgeClient";
 import type { ChatWidgetConfig } from "./types";
 
@@ -47,7 +55,21 @@ export function ChatWidget({
   const [hydrated, setHydrated] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  /** Follow the latest token. False after the user scrolls up past the threshold. */
+  const stickToBottomRef = useRef(true);
+  /** Scroll events caused by our own pin must not clear stickiness. */
+  const ignoreScrollRef = useRef(false);
+  /** True only while a smooth «Hopp til siste» animation is in flight. */
+  const smoothLockRef = useRef(false);
+  /** Bumps so a late scrollend from an older jump cannot unlock a newer one. */
+  const smoothGenRef = useRef(0);
+  const scrollUnlockTimer = useRef<number | null>(null);
+  /** Pointer/touch is down on the transcript — don't fight the gesture. */
+  const userScrollingRef = useRef(false);
+  const panelOpenRef = useRef(false);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
 
   const sessionId = useMemo(() => getOrCreateSessionId(), []);
   const leadPartType = `tool-${config.leadToolName}`;
@@ -149,12 +171,172 @@ export function ChatWidget({
     return () => window.removeEventListener("message", handler);
   }, []);
 
+  const scrollBox = (el: HTMLElement): ScrollBox => ({
+    scrollTop: el.scrollTop,
+    scrollHeight: el.scrollHeight,
+    clientHeight: el.clientHeight,
+  });
+
+  const syncJumpChip = (box: ScrollBox) => {
+    const show = shouldShowJumpToLatest(box);
+    setShowJumpToLatest((prev) => (prev === show ? prev : show));
+  };
+
+  const pinToBottom = (el: HTMLElement, intent: "follow" | "jump") => {
+    const behavior = scrollBehaviorFor(
+      intent,
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false,
+    );
+    const gen = ++smoothGenRef.current;
+    if (scrollUnlockTimer.current != null) {
+      clearTimeout(scrollUnlockTimer.current);
+      scrollUnlockTimer.current = null;
+    }
+    ignoreScrollRef.current = true;
+    if (behavior === "auto") {
+      // Instant. `behavior: "smooth"` on every token fights itself mid-stream.
+      smoothLockRef.current = false;
+      el.scrollTop = el.scrollHeight;
+      ignoreScrollRef.current = false;
+      return;
+    }
+    smoothLockRef.current = true;
+    el.scrollTo({ top: el.scrollHeight, behavior });
+    const unlock = () => {
+      if (smoothGenRef.current !== gen) return;
+      ignoreScrollRef.current = false;
+      smoothLockRef.current = false;
+      if (scrollUnlockTimer.current != null) {
+        clearTimeout(scrollUnlockTimer.current);
+        scrollUnlockTimer.current = null;
+      }
+    };
+    el.addEventListener("scrollend", unlock, { once: true });
+    scrollUnlockTimer.current = window.setTimeout(unlock, 1000);
+  };
+
+  const cancelSmoothScroll = (el: HTMLElement) => {
+    if (!smoothLockRef.current) return;
+    smoothGenRef.current += 1;
+    smoothLockRef.current = false;
+    ignoreScrollRef.current = false;
+    if (scrollUnlockTimer.current != null) {
+      clearTimeout(scrollUnlockTimer.current);
+      scrollUnlockTimer.current = null;
+    }
+    // Re-assigning scrollTop aborts an in-flight smooth scrollTo.
+    const top = el.scrollTop;
+    el.scrollTop = top;
+  };
+
+  const followIfStuck = (el: HTMLElement) => {
+    if (
+      !shouldFollowContent({
+        stickToBottom: stickToBottomRef.current,
+        userIsScrolling: userScrollingRef.current,
+      })
+    ) {
+      syncJumpChip(scrollBox(el));
+      return;
+    }
+    pinToBottom(el, "follow");
+    syncJumpChip(scrollBox(el));
+  };
+
+  const resumeStickiness = () => {
+    stickToBottomRef.current = nextStickToBottom(stickToBottomRef.current, { type: "send" });
+    userScrollingRef.current = false;
+    setShowJumpToLatest(false);
+  };
+
+  // Stick while near the bottom; pause when the user scrolls up. Same container
+  // in the embed/mobile sheet and the desktop panel (`scrollRef`).
   useEffect(() => {
-    scrollRef.current?.scrollTo({
-      top: scrollRef.current.scrollHeight,
-      behavior: "smooth",
-    });
-  }, [messages, status]);
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const onScroll = () => {
+      if (ignoreScrollRef.current) return;
+      const box = scrollBox(el);
+      stickToBottomRef.current = nextStickToBottom(stickToBottomRef.current, {
+        type: "scroll",
+        box,
+      });
+      syncJumpChip(box);
+    };
+
+    const onGestureStart = () => {
+      userScrollingRef.current = true;
+      cancelSmoothScroll(el);
+    };
+
+    const onWheel = () => {
+      cancelSmoothScroll(el);
+    };
+
+    const onGestureEnd = () => {
+      userScrollingRef.current = false;
+      const box = scrollBox(el);
+      stickToBottomRef.current = nextStickToBottom(stickToBottomRef.current, {
+        type: "scroll",
+        box,
+      });
+      if (stickToBottomRef.current) pinToBottom(el, "follow");
+      syncJumpChip(scrollBox(el));
+    };
+
+    el.addEventListener("scroll", onScroll, { passive: true });
+    el.addEventListener("pointerdown", onGestureStart);
+    el.addEventListener("pointerup", onGestureEnd);
+    el.addEventListener("pointercancel", onGestureEnd);
+    el.addEventListener("wheel", onWheel, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      el.removeEventListener("pointerdown", onGestureStart);
+      el.removeEventListener("pointerup", onGestureEnd);
+      el.removeEventListener("pointercancel", onGestureEnd);
+      el.removeEventListener("wheel", onWheel);
+      if (scrollUnlockTimer.current != null) {
+        clearTimeout(scrollUnlockTimer.current);
+        scrollUnlockTimer.current = null;
+      }
+    };
+    // Rebind when the panel mounts the transcript.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, embed]);
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const open = isOpen || embed;
+    if (open && !panelOpenRef.current) {
+      stickToBottomRef.current = true;
+      userScrollingRef.current = false;
+    }
+    panelOpenRef.current = open;
+    if (!el) return;
+    followIfStuck(el);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, status, isOpen, embed]);
+
+  // Markdown/images can grow after the message state settles.
+  useEffect(() => {
+    const content = contentRef.current;
+    const el = scrollRef.current;
+    if (!content || !el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => followIfStuck(el));
+    observer.observe(content);
+    return () => observer.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, embed]);
+
+  const jumpToLatest = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    stickToBottomRef.current = nextStickToBottom(stickToBottomRef.current, { type: "jump" });
+    userScrollingRef.current = false;
+    setShowJumpToLatest(false);
+    pinToBottom(el, "jump");
+  };
 
   // When the prefill tool returns {action:"prefill", form, fields}, ask the
   // parent (via the site-bridge) to fill its form. Fire once per message.
@@ -189,6 +371,7 @@ export function ChatWidget({
     e.preventDefault();
     if (!input.trim() || isStreaming) return;
     setErrorMsg(null);
+    resumeStickiness();
     sendMessage({ text: input });
     postToParent({ type: "nettsmed-chat-event", event: "chatbot_message" });
     setInput("");
@@ -212,6 +395,7 @@ export function ChatWidget({
 
   const handleRetry = () => {
     setErrorMsg(null);
+    resumeStickiness();
     regenerate();
   };
 
@@ -243,6 +427,7 @@ export function ChatWidget({
   const handleQuickPrompt = (text: string) => {
     if (isStreaming) return;
     setErrorMsg(null);
+    resumeStickiness();
     sendMessage({ text });
     postToParent({ type: "nettsmed-chat-event", event: "chatbot_message" });
   };
@@ -326,15 +511,17 @@ export function ChatWidget({
             </button>
           </header>
 
+          <div className="relative flex min-h-0 flex-1 flex-col">
           <div
             ref={scrollRef}
             role="log"
             aria-live="polite"
             aria-busy={isStreaming}
             aria-label={`Samtale med ${config.assistantName}`}
-            className="flex-1 overflow-y-scroll px-4 py-5 space-y-3.5 bg-[var(--cw-msg-bg)]"
+            className="min-h-0 flex-1 overflow-y-scroll px-4 py-5 bg-[var(--cw-msg-bg)]"
             style={{ scrollbarGutter: "stable" }}
           >
+            <div ref={contentRef} className="space-y-3.5">
             {messages.length === 0 && (
               <>
                 <div className="flex gap-2.5 animate-[messageIn_0.35s_ease-out]">
@@ -507,6 +694,20 @@ export function ChatWidget({
                 </div>
               </div>
             )}
+            </div>
+          </div>
+          {showJumpToLatest && (
+            <button
+              type="button"
+              onClick={jumpToLatest}
+              className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 inline-flex items-center gap-1.5 rounded-full border border-[var(--cw-border)] bg-white px-3 py-1.5 text-[12.5px] font-medium text-[var(--cw-primary)] shadow-[0_8px_20px_-8px_rgba(31,49,51,0.55)] hover:bg-[var(--cw-msg-bg)] cursor-pointer"
+            >
+              Hopp til siste
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                <path d="M2.5 4.5 L6 8 L9.5 4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          )}
           </div>
 
           <form
