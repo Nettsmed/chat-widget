@@ -1,23 +1,19 @@
 /**
  * Live «Søker …» while the Spør KI backend routes via Jev.
  *
- * Contract (companion nettsmed-site): when Jev ran, the chat Response carries
- *   X-Jev-Route: prompt_only | semantic_search | ask_clarify | off | error_fallback
- *   X-Jev-Gated: 0 | 1
- *   X-Jev-Latency-Ms: <int>
+ * Locked client contract (nettsmed-site #34): `DefaultChatTransport` does not
+ * pass Response headers into `useChat`. On every 200 chat stream the site
+ * prepends a transient UI-message data part. `useChat` `onData` is the only
+ * place that part is visible (transient parts are not added to `message.parts`).
  *
- * `@ai-sdk/react` `useChat` does not surface response headers (`onResponse` was
- * removed in AI SDK 5). `DefaultChatTransport` does accept a custom `fetch`,
- * and that Response's headers are readable as soon as `fetch` resolves — before
- * the body stream is consumed. That is the path this package uses.
+ *   type: "data-jev-route"   // AI SDK data-part name
+ *   data: {
+ *     route: "prompt_only" | "semantic_search" | "ask_clarify" | "off" | "error_fallback"
+ *     gated?: 0 | 1 | boolean   // optional, not shown
+ *     latencyMs?: number        // optional, not shown (`latency` accepted too)
+ *   }
  *
- * Fallback, if the site streams the route instead of (or before) a readable
- * header: a UI-message data part
- *   { type: "data-jev-route", data: { route: "semantic_search" }, transient?: true }
- *   or data: "semantic_search"
- * Transient parts only arrive via `onData`; persisted parts also show up on
- * the assistant message. Unknown / missing route keeps the typing dots.
- * `X-Jev-Gated` and `X-Jev-Latency-Ms` are observability for the site, not UI.
+ * Unknown / missing route keeps the typing dots. Only `semantic_search` is a search.
  */
 
 export const JEV_ROUTES = [
@@ -30,10 +26,21 @@ export const JEV_ROUTES = [
 
 export type JevRoute = (typeof JEV_ROUTES)[number];
 
-export const JEV_ROUTE_HEADER = "X-Jev-Route";
-
-/** AI SDK data-part type. Prefix `data-` is required by the UI message stream. */
+/**
+ * AI SDK data-part type (`data-${name}`). `onData` parts use this as `type`.
+ * Also accepted as a `name` if a producer sets that field separately.
+ */
 export const JEV_ROUTE_DATA_TYPE = "data-jev-route";
+
+/** Optional fields on the part. The widget only reads `route`. */
+export type JevRoutePartData = {
+  route: JevRoute;
+  /** Confidence gate fired. 0 | 1 or boolean. Not rendered. */
+  gated?: 0 | 1 | boolean;
+  /** Router latency. Not rendered. `latency` is accepted as an alias. */
+  latencyMs?: number;
+  latency?: number;
+};
 
 /** Generic search status. Site-specific copy is `SEARCHING_ON_SITE_LABEL`. */
 export const SEARCHING_LABEL = "Søker …";
@@ -52,25 +59,23 @@ export function parseJevRoute(value: unknown): JevRoute | null {
   return ROUTE_SET.has(normalized) ? (normalized as JevRoute) : null;
 }
 
-export function readJevRouteHeader(
-  headers: { get(name: string): string | null } | null | undefined,
-): JevRoute | null {
-  if (!headers) return null;
-  // Fetch `Headers.get` is case-insensitive; the second lookup covers a
-  // plain map that stored the header already lowercased.
-  return parseJevRoute(headers.get(JEV_ROUTE_HEADER) ?? headers.get(JEV_ROUTE_HEADER.toLowerCase()));
+function isJevRoutePart(part: { type?: unknown; name?: unknown }): boolean {
+  return part.type === JEV_ROUTE_DATA_TYPE || part.name === JEV_ROUTE_DATA_TYPE;
 }
 
+/**
+ * Route from a `useChat` `onData` part. Ignores optional `gated` / `latencyMs`.
+ * Returns null for any other part, so the caller must not guess a search.
+ */
 export function readJevRouteDataPart(part: unknown): JevRoute | null {
   if (!part || typeof part !== "object") return null;
-  const candidate = part as { type?: unknown; data?: unknown };
-  if (candidate.type !== JEV_ROUTE_DATA_TYPE) return null;
+  const candidate = part as { type?: unknown; name?: unknown; data?: unknown };
+  if (!isJevRoutePart(candidate)) return null;
   const data = candidate.data;
   if (typeof data === "string") return parseJevRoute(data);
-  if (data && typeof data === "object" && "route" in data) {
-    return parseJevRoute((data as { route?: unknown }).route);
-  }
-  return null;
+  if (!data || typeof data !== "object") return null;
+  const record = data as { route?: unknown; choice?: unknown };
+  return parseJevRoute(record.route ?? record.choice);
 }
 
 export type WaitingMessage = {
@@ -126,7 +131,7 @@ export function routeFromParts(parts: WaitingMessage["parts"]): JevRoute | null 
   return found;
 }
 
-/** Header / onData wins. Parts are only a fallback while the signal is still unknown. */
+/** onData wins. Message parts are only a fallback if the part was not transient. */
 export function resolveTurnRoute(signaled: JevRoute | null, partsRoute: JevRoute | null): JevRoute | null {
   return signaled ?? partsRoute;
 }

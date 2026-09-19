@@ -27,7 +27,6 @@ import {
 import {
   isSilentAssistantPlaceholder,
   readJevRouteDataPart,
-  readJevRouteHeader,
   transcriptWait,
   waitingRowVisible,
   type JevRoute,
@@ -128,14 +127,6 @@ export function ChatWidget({
   const { messages, sendMessage, status, setMessages, regenerate } = useChat({
     transport: new DefaultChatTransport({
       api: config.apiPath ?? "/api/chat",
-      // Headers are available when fetch resolves, before the SDK reads the
-      // body. useChat itself does not expose them.
-      fetch: async (input, init) => {
-        const response = await globalThis.fetch(input, init);
-        const route = readJevRouteHeader(response.headers);
-        if (route) setJevRoute(route);
-        return response;
-      },
       body: () => {
         const p =
           typeof window !== "undefined"
@@ -149,6 +140,8 @@ export function ChatWidget({
         };
       },
     }),
+    // Response headers never reach useChat. The site prepends a transient
+    // `data-jev-route` part on every 200 stream; onData is where it arrives.
     onData: (part) => {
       const route = readJevRouteDataPart(part);
       if (route) setJevRoute(route);
