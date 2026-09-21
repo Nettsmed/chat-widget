@@ -36,6 +36,22 @@ export type ChatWidgetConfig = {
   closeAriaLabel: string;
   sendAriaLabel: string;
   leadSavingLabel: string;
+  /**
+   * Copy for the visible «send conversation» form (email + comment).
+   * Omitted fields use the Norwegian defaults. The comment is required when
+   * `capture_lead` is called with `explicit_send`.
+   */
+  leadForm?: {
+    title?: string;
+    emailLabel?: string;
+    emailPlaceholder?: string;
+    commentLabel?: string;
+    commentPlaceholder?: string;
+    submitLabel?: string;
+    commentMissing?: string;
+    emailInvalid?: string;
+    hint?: string;
+  };
   // lead/contact tool wiring
   leadToolName: string; // matches `tool-${leadToolName}`
   leadEventName: string; // GA event name on successful lead
