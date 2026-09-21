@@ -34,6 +34,26 @@ import {
   type WaitingMessage,
 } from "./jevRoute";
 import { createBridgeClient } from "./siteBridgeClient";
+import { LeadCaptureForm } from "./LeadCaptureForm";
+import {
+  DEFAULT_LEAD_FORM_COPY,
+  buildLeadSubmission,
+  commentRequiredFor,
+  fallbackLeadSummary,
+  findCollectedEmail,
+  hasOpenLeadForm,
+  isValidEmail,
+  leadToolView,
+  leadFormSuperseded,
+  messagesWithLeadSubmission,
+  readLeadComment,
+  readLeadEmail,
+  shouldContinueExistingApproval,
+  shouldShowStandaloneLeadForm,
+  type LeadFormCopy,
+  type LeadScanMessage,
+  type LeadToolSnapshot,
+} from "./leadForm";
 import type { ChatWidgetConfig } from "./types";
 
 const STORAGE_KEY = "nettsmed-chat-messages-v1";
@@ -99,6 +119,17 @@ export function ChatWidget({
 
   const sessionId = useMemo(() => getOrCreateSessionId(), []);
   const leadPartType = `tool-${config.leadToolName}`;
+  const leadCopy: LeadFormCopy = { ...DEFAULT_LEAD_FORM_COPY, ...config.leadForm };
+  const [leadBusy, setLeadBusy] = useState(false);
+  const [leadError, setLeadError] = useState<string | null>(null);
+  const queryEmail = useMemo(() => {
+    if (typeof window === "undefined") return "";
+    try {
+      return new URLSearchParams(window.location.search).get("email") ?? "";
+    } catch {
+      return "";
+    }
+  }, []);
 
   // Parent page host + origin (from ?ctx). Host drives same-site link follow;
   // origin scopes the site-bridge postMessage target.
@@ -625,8 +656,11 @@ export function ChatWidget({
   }, [isOpen, embed]);
 
   // Keep the cursor in the input after each response so you can just keep typing.
+  // Don't steal focus from the lead form — that is the next thing to fill in.
   useEffect(() => {
-    if (!isStreaming && (isOpen || embed)) inputRef.current?.focus();
+    if (!isStreaming && (isOpen || embed) && !hasOpenLeadForm(messages as LeadScanMessage[], leadPartType)) {
+      inputRef.current?.focus();
+    }
   }, [isStreaming, isOpen, embed]);
 
   const quickPrompts = config.quickPrompts;
@@ -639,6 +673,91 @@ export function ChatWidget({
     sendMessage({ text });
     postToParent({ type: "nettsmed-chat-event", event: "chatbot_message" });
   };
+
+  const scanMessages = messages as LeadScanMessage[];
+  const collectedEmail = findCollectedEmail(scanMessages, queryEmail);
+  const showStandaloneLeadForm = shouldShowStandaloneLeadForm(scanMessages, leadPartType);
+
+  const leadLock = useRef(false);
+
+  const submitLead = (draft: { email: string; comment: string }, target?: {
+    messageId: string;
+    part: LeadToolSnapshot;
+    explicitSend: boolean;
+  }) => {
+    if (leadLock.current || isStreaming) return;
+    leadLock.current = true;
+    const explicitSend = target ? target.explicitSend : true;
+    const existing = target?.part.input;
+    const built = buildLeadSubmission(existing, {
+      email: draft.email || collectedEmail,
+      comment: draft.comment,
+    }, {
+      explicitSend,
+      summaryFallback: fallbackLeadSummary(scanMessages),
+    });
+    if (!built.ok) {
+      setLeadError(built.field === "comment" ? leadCopy.commentMissing : leadCopy.emailInvalid);
+      return;
+    }
+    setLeadError(null);
+    const last = messages[messages.length - 1];
+    const continueApproval =
+      target != null &&
+      shouldContinueExistingApproval(target.part, last?.id === target.messageId) &&
+      typeof target.part.toolCallId === "string";
+    const stamp = Date.now().toString(36);
+    const next = messagesWithLeadSubmission(
+      messages as unknown as Parameters<typeof messagesWithLeadSubmission>[0],
+      leadPartType,
+      built.input,
+      continueApproval
+        ? {
+            messageId: target.messageId,
+            toolCallId: target.part.toolCallId as string,
+            approvalId: target.part.approval?.id as string,
+          }
+        : null,
+      { messageId: `lead-${stamp}`, toolCallId: `call-${stamp}`, approvalId: `appr-${stamp}` },
+    );
+    setLeadBusy(true);
+    setJevRoute(null);
+    resumeStickiness();
+    setMessages(next as typeof messages);
+    // Last message is the assistant tool call. sendMessage() with no new user
+    // turn posts that history; streamText executes the approved capture_lead.
+    void sendMessage()
+      .catch(() => setLeadError(config.errorMessage))
+      .finally(() => {
+        leadLock.current = false;
+        setLeadBusy(false);
+      });
+  };
+
+  const renderLeadForm = (
+    key: string,
+    options: {
+      initialEmail: string;
+      initialComment: string;
+      showEmail: boolean;
+      commentRequired: boolean;
+      flush?: boolean;
+      onSubmit: (draft: { email: string; comment: string }) => void;
+    },
+  ) => (
+    <LeadCaptureForm
+      key={key}
+      copy={leadCopy}
+      initialEmail={options.initialEmail}
+      initialComment={options.initialComment}
+      showEmail={options.showEmail}
+      commentRequired={options.commentRequired}
+      busy={leadBusy || isStreaming}
+      serverError={leadError}
+      flush={options.flush}
+      onSubmit={options.onSubmit}
+    />
+  );
 
   const c = config.colors;
   const rootStyle = {
@@ -761,7 +880,7 @@ export function ChatWidget({
               </>
             )}
 
-            {renderedMessages.map((m) => (
+            {renderedMessages.map((m, messageIndex) => (
               <div
                 key={m.id}
                 className={`flex gap-2.5 animate-[messageIn_0.3s_ease-out] ${
@@ -777,7 +896,15 @@ export function ChatWidget({
                   className={
                     m.role === "user"
                       ? "max-w-[78%] bg-[var(--cw-primary)] text-white rounded-[10px] rounded-tr-[4px] px-3.5 py-2.5 text-[13.5px] leading-[1.5]"
-                      : "max-w-[82%] bg-white text-[var(--cw-primary)] rounded-[10px] rounded-tl-[4px] px-3.5 py-3 text-[13.5px] border border-[var(--cw-border)]/60"
+                      : `${
+                          m.parts?.some(
+                            (p) =>
+                              p.type === leadPartType &&
+                              leadToolView(p as unknown as LeadToolSnapshot) === "form",
+                          )
+                            ? "min-w-0 max-w-full flex-1"
+                            : "max-w-[82%]"
+                        } bg-white text-[var(--cw-primary)] rounded-[10px] rounded-tl-[4px] px-3.5 py-3 text-[13.5px] border border-[var(--cw-border)]/60`
                   }
                 >
                   {m.parts?.map((part, i) => {
@@ -793,23 +920,51 @@ export function ChatWidget({
                       );
                     }
                     if (part.type === leadPartType) {
-                      const lp = part as unknown as {
-                        state: string;
+                      const lp = part as unknown as LeadToolSnapshot & {
                         output?: { ok: boolean; message: string };
                       };
-                      if (lp.state === "output-available") {
-                        const output = lp.output as { ok: boolean; message: string };
+                      const view = leadToolView(lp);
+                      if (view === "success") {
                         return (
                           <div
                             key={i}
                             className="mt-2 pt-2 border-t border-current/10 text-[12px] opacity-70 flex items-start gap-1.5"
                           >
                             <span className="text-[var(--cw-accent)] shrink-0 mt-0.5">✓</span>
-                            <span>{output.message}</span>
+                            <span>{lp.output?.message}</span>
                           </div>
                         );
                       }
-                      if (lp.state === "input-streaming" || lp.state === "input-available") {
+                      if (view === "form") {
+                        if (leadFormSuperseded(renderedMessages as LeadScanMessage[], messageIndex, leadPartType)) {
+                          return null;
+                        }
+                        const knownEmail = readLeadEmail(lp.input) || collectedEmail;
+                        return renderLeadForm(lp.toolCallId || `${m.id}-${i}`, {
+                          initialEmail: knownEmail,
+                          initialComment: readLeadComment(lp.input),
+                          showEmail: !isValidEmail(knownEmail),
+                          commentRequired: commentRequiredFor(lp.input, false),
+                          onSubmit: (draft) =>
+                            submitLead(draft, {
+                              messageId: m.id,
+                              part: lp,
+                              explicitSend: commentRequiredFor(lp.input, false),
+                            }),
+                        });
+                      }
+                      if (view === "failed") {
+                        return (
+                          <div
+                            key={i}
+                            className="mt-2 pt-2 border-t border-current/10 text-[12px] opacity-70 flex items-start gap-1.5"
+                          >
+                            <span className="shrink-0 mt-0.5">!</span>
+                            <span>{lp.output?.message || config.errorMessage}</span>
+                          </div>
+                        );
+                      }
+                      if (lp.state === "input-streaming" || lp.state === "input-available" || lp.state === "approval-responded") {
                         return (
                           <div key={i} className="mt-2 text-[12px] opacity-60 italic">
                             {config.leadSavingLabel}
@@ -865,6 +1020,24 @@ export function ChatWidget({
                 </div>
               </div>
             ))}
+
+            {showStandaloneLeadForm && (
+              <div className="flex gap-2.5 animate-[messageIn_0.3s_ease-out]">
+                <div className="flex-shrink-0 w-8 h-8 bg-[var(--cw-primary-hover)] text-white rounded-full flex items-center justify-center text-[12px] font-semibold mt-0.5">
+                  {config.avatarLetter}
+                </div>
+                <div className="min-w-0 flex-1 bg-white text-[var(--cw-primary)] rounded-[10px] rounded-tl-[4px] px-3.5 py-3 text-[13.5px] border border-[var(--cw-border)]/60">
+                  {renderLeadForm("standalone-send", {
+                    initialEmail: collectedEmail,
+                    initialComment: "",
+                    showEmail: !isValidEmail(collectedEmail),
+                    commentRequired: true,
+                    flush: true,
+                    onSubmit: (draft) => submitLead(draft),
+                  })}
+                </div>
+              </div>
+            )}
 
             {showWaitingRow && (
                 <div className="flex gap-2.5 animate-[messageIn_0.3s_ease-out]">

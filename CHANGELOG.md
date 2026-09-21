@@ -4,6 +4,13 @@ All notable changes to `@nettsmed/chat-widget`. Format: Keep a Changelog + SemVe
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-09-21
+
+### Added
+- **Visible comment when the visitor sends the conversation.** On the «Send samtalen til oss» path the transcript shows a form: e-post if we do not already have one, and a short **Kommentar** (required). Submitting it continues the chat so `capture_lead` runs with `comment`, `visitor_message`, and `explicit_send: true` — the same fields Mailgun reads as «Kommentar fra besøker». An empty comment cannot be sent on that path.
+- The form shows in two cases: the lead tool pauses in AI SDK `approval-requested` (human-in-the-loop; the visitor’s text is written onto that tool call before it is approved), or the model only asked in prose (no tool part yet). The prose path still posts an approved `tool-${leadToolName}` part so the server executes `capture_lead` instead of waiting for the model to ask again.
+- Optional `ChatWidgetConfig.leadForm` overrides the Norwegian copy. A successful lead still renders the tool’s own confirmation; a refused explicit send shows the form again.
+
 ## [0.7.4] - 2026-09-19
 
 ### Added
