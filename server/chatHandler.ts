@@ -9,7 +9,6 @@ import type {
   CheckAnswerContext,
   LogMessagesInfo,
   PageInfo,
-  PrepareTurnContext,
   PrepareTurnResult,
   RequestInfo,
 } from "./types";
@@ -210,11 +209,10 @@ export function createChatHandler(cfg: ChatHandlerConfig) {
     const access = await resolveCtx(req);
     let tools = cfg.getTools(access, info);
 
-    let turn: PrepareTurnResult | void;
-    const turnCtx: PrepareTurnContext = { req, access, info, sessionId: sid, tools };
+    let turn: PrepareTurnResult | void = undefined;
     if (cfg.prepareTurn) {
       try {
-        turn = await cfg.prepareTurn(turnCtx);
+        turn = await cfg.prepareTurn({ req, access, info, sessionId: sid, tools });
       } catch (err) {
         console.error("[chat] prepareTurn failed:", err);
         cfg.onStreamError?.(err);
@@ -222,7 +220,6 @@ export function createChatHandler(cfg: ChatHandlerConfig) {
     }
     if (turn?.disableSearchTool) {
       tools = omitTool(tools, searchToolName);
-      turnCtx.tools = tools;
     }
 
     const systemPrompt = cfg.buildSystemPrompt(content, page);
@@ -274,7 +271,14 @@ export function createChatHandler(cfg: ChatHandlerConfig) {
           });
         }
         if (cfg.checkAnswer && text) {
-          const checkCtx: CheckAnswerContext = { ...turnCtx, tools, text };
+          const checkCtx: CheckAnswerContext = {
+            req,
+            access,
+            info,
+            sessionId: sid,
+            tools,
+            text,
+          };
           try {
             const issue = checkAnswerIssue(await cfg.checkAnswer(text, checkCtx));
             if (issue) {
