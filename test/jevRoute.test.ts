@@ -1,14 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   JEV_ROUTE_DATA_TYPE,
-  JEV_ROUTE_HEADER,
   SEARCHING_LABEL,
   SEARCHING_ON_SITE_LABEL,
   TYPING_SR_LABEL,
   isSilentAssistantPlaceholder,
   parseJevRoute,
   readJevRouteDataPart,
-  readJevRouteHeader,
   resolveTurnRoute,
   searchingStatusLabel,
   transcriptWait,
@@ -42,34 +40,36 @@ describe("parseJevRoute", () => {
   });
 });
 
-describe("readJevRouteHeader", () => {
-  it("reads X-Jev-Route", () => {
-    const headers = new Headers({ [JEV_ROUTE_HEADER]: "semantic_search" });
-    expect(readJevRouteHeader(headers)).toBe("semantic_search");
-  });
-
-  it("reads a lowercased map and ignores a missing or invalid header", () => {
-    expect(readJevRouteHeader({ get: (name) => (name === "x-jev-route" ? "ask_clarify" : null) })).toBe(
-      "ask_clarify",
-    );
-    expect(readJevRouteHeader(new Headers())).toBeNull();
-    expect(readJevRouteHeader(new Headers({ [JEV_ROUTE_HEADER]: "nope" }))).toBeNull();
-    expect(readJevRouteHeader(null)).toBeNull();
-  });
-});
-
 describe("readJevRouteDataPart", () => {
-  it("accepts the documented object and string payloads", () => {
-    expect(readJevRouteDataPart({ type: JEV_ROUTE_DATA_TYPE, data: { route: "semantic_search" } })).toBe(
-      "semantic_search",
-    );
-    expect(readJevRouteDataPart({ type: JEV_ROUTE_DATA_TYPE, data: "prompt_only" })).toBe("prompt_only");
+  it("reads the locked transient part, including optional gated and latency", () => {
+    expect(
+      readJevRouteDataPart({
+        type: JEV_ROUTE_DATA_TYPE,
+        transient: true,
+        data: { route: "semantic_search", gated: 1, latencyMs: 374 },
+      }),
+    ).toBe("semantic_search");
+    expect(
+      readJevRouteDataPart({
+        type: JEV_ROUTE_DATA_TYPE,
+        data: { route: "prompt_only", gated: false, latency: 80 },
+      }),
+    ).toBe("prompt_only");
+    expect(
+      readJevRouteDataPart({
+        name: JEV_ROUTE_DATA_TYPE,
+        data: { route: "ask_clarify", gated: 0 },
+      }),
+    ).toBe("ask_clarify");
+    expect(readJevRouteDataPart({ type: JEV_ROUTE_DATA_TYPE, data: { choice: "off" } })).toBe("off");
+    expect(readJevRouteDataPart({ type: JEV_ROUTE_DATA_TYPE, data: "error_fallback" })).toBe("error_fallback");
   });
 
   it("ignores other parts and bad payloads", () => {
     expect(readJevRouteDataPart({ type: "text", text: "hei" })).toBeNull();
     expect(readJevRouteDataPart({ type: "data-weather", data: { route: "semantic_search" } })).toBeNull();
-    expect(readJevRouteDataPart({ type: JEV_ROUTE_DATA_TYPE, data: { route: "maybe" } })).toBeNull();
+    expect(readJevRouteDataPart({ type: JEV_ROUTE_DATA_TYPE, data: { route: "maybe", gated: 1 } })).toBeNull();
+    expect(readJevRouteDataPart({ type: JEV_ROUTE_DATA_TYPE, data: { gated: 1, latencyMs: 10 } })).toBeNull();
     expect(readJevRouteDataPart(null)).toBeNull();
   });
 });
@@ -154,7 +154,7 @@ describe("transcriptWait", () => {
     );
   });
 
-  it("reads a persisted data part when no header signal has arrived", () => {
+  it("reads a data part when onData has not signaled yet", () => {
     const messages = [
       user(),
       assistant([
@@ -168,13 +168,24 @@ describe("transcriptWait", () => {
     });
   });
 
-  it("does not let a parts fallback override a known non-search header", () => {
+  it("does not let a parts fallback override a known non-search onData signal", () => {
     const messages = [
       user(),
       assistant([{ type: JEV_ROUTE_DATA_TYPE, data: { route: "semantic_search" } }]),
     ];
     expect(resolveTurnRoute("prompt_only", "semantic_search")).toBe("prompt_only");
     expect(transcriptWait({ ...base, status: "streaming", messages, signaledRoute: "prompt_only" }).kind).toBe("dots");
+  });
+
+  it("does not search when the transient part is not semantic_search", () => {
+    for (const route of ["prompt_only", "ask_clarify", "off", "error_fallback"] as const) {
+      const signaled = readJevRouteDataPart({
+        type: JEV_ROUTE_DATA_TYPE,
+        transient: true,
+        data: { route, gated: 0, latencyMs: 120 },
+      });
+      expect(transcriptWait({ ...base, status: "streaming", signaledRoute: signaled }).kind).toBe("dots");
+    }
   });
 
   it("honours searchingLabel", () => {
