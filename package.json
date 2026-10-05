@@ -1,6 +1,6 @@
 {
   "name": "@nettsmed/chat-widget",
-  "version": "0.7.5",
+  "version": "0.8.0",
   "private": false,
   "license": "UNLICENSED",
   "type": "module",
@@ -30,6 +30,7 @@
   },
   "peerDependencies": {
     "@ai-sdk/anthropic": "^3",
+    "@ai-sdk/openai": "^3",
     "@ai-sdk/react": "^3",
     "@libsql/client": "^0.17",
     "@upstash/ratelimit": "^2",
@@ -40,6 +41,11 @@
     "react-markdown": "^10",
     "remark-gfm": "^4",
     "zod": "^4"
+  },
+  "peerDependenciesMeta": {
+    "@ai-sdk/openai": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "^20",
