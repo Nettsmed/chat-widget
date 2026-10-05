@@ -1,10 +1,17 @@
-import { streamText, stepCountIs, convertToModelMessages, UI_MESSAGE_STREAM_HEADERS, type UIMessage } from "ai";
+import { streamText, stepCountIs, convertToModelMessages, UI_MESSAGE_STREAM_HEADERS, type ToolSet, type UIMessage } from "ai";
 import { checkRateLimit, getClientIp } from "./ratelimit";
 import { logMessage } from "./turso";
 import { resolveAccessContext as defaultResolveAccessContext } from "./access-context";
-import { resolveAnthropicModel } from "./model";
+import { resolveChatModel } from "./model";
 import { checkSpendCap, recordUsage } from "./spendcap";
-import type { ChatHandlerConfig } from "./types";
+import type {
+  ChatHandlerConfig,
+  CheckAnswerContext,
+  LogMessagesInfo,
+  PageInfo,
+  PrepareTurnResult,
+  RequestInfo,
+} from "./types";
 
 type ChatRequestBody = {
   messages: UIMessage[];
@@ -12,6 +19,7 @@ type ChatRequestBody = {
   sessionId?: string;
   pageUrl?: string;
   pageTitle?: string;
+  faq?: boolean;
 };
 
 function textFromMessage(m: UIMessage): string {
@@ -21,6 +29,38 @@ function textFromMessage(m: UIMessage): string {
       .map((p) => (p as { type: "text"; text: string }).text)
       .join("\n") ?? ""
   );
+}
+
+function shouldLogMessages(
+  logMessages: ChatHandlerConfig["logMessages"],
+  info: LogMessagesInfo,
+): boolean {
+  if (logMessages === undefined) return true;
+  if (typeof logMessages === "boolean") return logMessages;
+  return logMessages(info);
+}
+
+function omitTool(tools: ToolSet, name: string): ToolSet {
+  if (!(name in tools)) return tools;
+  const next = { ...tools };
+  delete next[name];
+  return next;
+}
+
+function checkAnswerIssue(result: unknown): string | undefined {
+  if (result == null || result === true) return undefined;
+  if (typeof result === "string") return result || undefined;
+  if (typeof result === "object") {
+    const obj = result as { message?: unknown; error?: unknown; ok?: unknown };
+    if (obj.ok === false) {
+      if (typeof obj.message === "string" && obj.message) return obj.message;
+      if (typeof obj.error === "string" && obj.error) return obj.error;
+      return "checkAnswer failed";
+    }
+    if (typeof obj.message === "string" && obj.message) return obj.message;
+    if (typeof obj.error === "string" && obj.error) return obj.error;
+  }
+  return undefined;
 }
 
 /**
@@ -52,6 +92,8 @@ export function createChatHandler(cfg: ChatHandlerConfig) {
   const maxTotalChars = cfg.maxTotalChars ?? 16000;
   const stepCount = cfg.stepCount ?? 3;
   const resolveCtx = cfg.resolveAccessContext ?? defaultResolveAccessContext;
+  const provider = cfg.provider ?? "anthropic";
+  const searchToolName = cfg.searchToolName ?? "search";
 
   // Last line of defence: any unexpected throw (a dead Redis, a tenant
   // `getTools`/`resolveAccessContext` blowing up) used to surface as a bare 500
@@ -73,16 +115,38 @@ export function createChatHandler(cfg: ChatHandlerConfig) {
       return new Response("Rate limit exceeded", { status: 429 });
     }
 
+    let rawBody = "";
+    try {
+      rawBody = await req.text();
+    } catch {
+      return new Response("Bad request", { status: 400 });
+    }
+
+    if (cfg.verifyRequest) {
+      let ok = false;
+      try {
+        ok = await cfg.verifyRequest(req, rawBody);
+      } catch (err) {
+        console.error("[chat] verifyRequest failed:", err);
+        cfg.onStreamError?.(err);
+        return new Response("Unauthorized", { status: 401 });
+      }
+      if (!ok) return new Response("Unauthorized", { status: 401 });
+    }
+
     let body: ChatRequestBody;
     try {
-      body = (await req.json()) as ChatRequestBody;
+      body = JSON.parse(rawBody) as ChatRequestBody;
     } catch {
       return new Response("Bad request", { status: 400 });
     }
 
     const { messages, referer, sessionId } = body;
-    const pageUrl = (body.pageUrl ?? "").slice(0, 300);
-    const pageTitle = (body.pageTitle ?? "").slice(0, 200);
+    const page: PageInfo = {
+      url: (body.pageUrl ?? "").slice(0, 300),
+      title: (body.pageTitle ?? "").slice(0, 200),
+    };
+    const faq = body.faq === true ? true : body.faq === false ? false : undefined;
     const sid = sessionId || "anonymous";
     const logIpVal = cfg.logIp ? ip : undefined;
 
@@ -97,8 +161,17 @@ export function createChatHandler(cfg: ChatHandlerConfig) {
     }
     if (totalChars > maxTotalChars) return new Response("Conversation too long", { status: 400 });
 
+    const info: RequestInfo = {
+      messages,
+      referer: referer ?? null,
+      page,
+      ip,
+      faq,
+    };
+    const persist = shouldLogMessages(cfg.logMessages, { ...info, sessionId: sid });
+
     const last = messages[messages.length - 1];
-    if (last && last.role === "user") {
+    if (persist && last && last.role === "user") {
       logMessage({
         sessionId: sid,
         messageId: last.id,
@@ -133,30 +206,61 @@ export function createChatHandler(cfg: ChatHandlerConfig) {
       }
     }
 
-    const ctx = await resolveCtx(req);
-    const tools = cfg.getTools(ctx, { messages, referer: referer ?? null });
-    const systemPrompt = cfg.buildSystemPrompt(content, { url: pageUrl, title: pageTitle });
+    const access = await resolveCtx(req);
+    let tools = cfg.getTools(access, info);
+
+    let turn: PrepareTurnResult | void = undefined;
+    if (cfg.prepareTurn) {
+      try {
+        turn = await cfg.prepareTurn({ req, access, info, sessionId: sid, tools });
+      } catch (err) {
+        console.error("[chat] prepareTurn failed:", err);
+        cfg.onStreamError?.(err);
+      }
+    }
+    if (turn?.disableSearchTool) {
+      tools = omitTool(tools, searchToolName);
+    }
+
+    const systemPrompt = cfg.buildSystemPrompt(content, page);
+    const pageBlock = cfg.buildPageBlock?.(page) ?? "";
+    const extraBlock = turn?.extraSystemBlock ?? "";
+
+    type SystemMsg = {
+      role: "system";
+      content: string;
+      providerOptions?: { anthropic: { cacheControl: { type: "ephemeral" } } };
+    };
+    const cachedSystem: SystemMsg = {
+      role: "system",
+      content: systemPrompt,
+      ...(provider === "anthropic"
+        ? { providerOptions: { anthropic: { cacheControl: { type: "ephemeral" as const } } } }
+        : {}),
+    };
+
+    const systemMessages: SystemMsg[] = [cachedSystem];
+    if (cfg.buildPageBlock && pageBlock) {
+      systemMessages.push({ role: "system", content: pageBlock });
+    }
+    if (extraBlock) {
+      systemMessages.push({ role: "system", content: extraBlock });
+    }
 
     const result = streamText({
-      model: resolveAnthropicModel(cfg.model, cfg.apiKey),
+      model: resolveChatModel(cfg.model, provider, cfg.apiKey),
       // Cache the (large, stable) system prompt via a cache breakpoint on the
       // system message — top-level providerOptions does NOT cache the system
-      // string. Cuts input tokens ~70% on repeat turns.
-      messages: [
-        {
-          role: "system",
-          content: systemPrompt,
-          providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
-        },
-        ...modelMessages,
-      ],
+      // string. Cuts input tokens ~70% on repeat turns. Page / per-turn blocks
+      // stay uncached so they do not bust that breakpoint.
+      messages: [...systemMessages, ...modelMessages],
       stopWhen: stepCountIs(stepCount),
       tools,
-      onFinish: ({ text, totalUsage }) => {
+      onFinish: async ({ text, totalUsage }) => {
         if (cfg.spendCap && totalUsage?.totalTokens) {
           recordUsage(cfg.spendCap, totalUsage.totalTokens);
         }
-        if (text && last) {
+        if (persist && text && last) {
           logMessage({
             sessionId: sid,
             messageId: `assistant-${last.id}`,
@@ -166,6 +270,26 @@ export function createChatHandler(cfg: ChatHandlerConfig) {
             ip: logIpVal,
           });
         }
+        if (cfg.checkAnswer && text) {
+          const checkCtx: CheckAnswerContext = {
+            req,
+            access,
+            info,
+            sessionId: sid,
+            tools,
+            text,
+          };
+          try {
+            const issue = checkAnswerIssue(await cfg.checkAnswer(text, checkCtx));
+            if (issue) {
+              console.error("[chat] checkAnswer:", issue);
+              cfg.onStreamError?.(new Error(issue));
+            }
+          } catch (err) {
+            console.error("[chat] checkAnswer failed:", err);
+            cfg.onStreamError?.(err);
+          }
+        }
       },
       onError: ({ error }) => {
         console.error("[chat] stream error:", error);
@@ -174,6 +298,7 @@ export function createChatHandler(cfg: ChatHandlerConfig) {
     });
 
     return result.toUIMessageStreamResponse({
+      headers: turn?.extraHeaders,
       onError: (error) => {
         const msg = error instanceof Error ? error.message : String(error);
         console.error("[chat] response error:", msg);

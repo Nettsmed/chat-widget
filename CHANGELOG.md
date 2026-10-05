@@ -4,6 +4,22 @@ All notable changes to `@nettsmed/chat-widget`. Format: Keep a Changelog + SemVe
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-05
+
+### Added
+- Optional `createChatHandler` hooks (backward compatible; omit them for v0.7.x behavior):
+  - `logMessages?: boolean | (info) => boolean` — skip Turso persistence (e.g. ephemeral sessions).
+  - `provider?: "anthropic" | "openai"` — default remains Anthropic. `resolveChatModel(id, provider, apiKey?)` is exported. `@ai-sdk/openai` is an **optional** peer (`^3`).
+  - `buildPageBlock?(page)` — second, uncached system message so page context does not bust the cached static prompt.
+  - `prepareTurn?(ctx)` — extra uncached system block, extra response headers, and `disableSearchTool` (omits host `searchToolName`, default `"search"`). The engine has no search/routing implementation.
+  - `checkAnswer?(text, ctx)` — post-answer check; reports via `onStreamError` / log; never mutates the stream.
+  - `verifyRequest?(req, rawBody)` — reject unsigned bodies with 401. HMAC helper (`<timestamp>.<body>`, SHA-256) exported from `./server`.
+- `RequestInfo` now includes `page`, `ip`, and optional `faq`.
+- `redactPII` exported from `@nettsmed/chat-widget/server` (generic email + Norwegian phone redaction).
+
+### Changed
+- This GitHub repository is **public**. The package still ships as a git-tag dependency (`#vX.Y.Z`). Do not put tenant prompts, secrets, pricing, or customer data in this repo.
+
 ## [0.7.5] - 2026-09-21
 
 ### Added

@@ -88,7 +88,10 @@ describe("checkRateLimit resilience", () => {
 describe("createChatHandler never returns a bare 500", () => {
   it("answers with the tenant errorMessage when the rate limiter blows up", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.doMock("../server/model", () => ({ resolveAnthropicModel: () => ({ modelId: "stub" }) }));
+    vi.doMock("../server/model", () => ({
+      resolveAnthropicModel: () => ({ modelId: "stub" }),
+      resolveChatModel: () => ({ modelId: "stub" }),
+    }));
     vi.doMock("../server/turso", () => ({ logMessage: vi.fn() }));
     vi.doMock("../server/ratelimit", () => ({
       checkRateLimit: async () => {

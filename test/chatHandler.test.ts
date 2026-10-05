@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Stub the model layer so no network is touched.
 vi.mock("../server/model", () => ({
   resolveAnthropicModel: vi.fn(() => ({ modelId: "stub" })),
+  resolveChatModel: vi.fn(() => ({ modelId: "stub" })),
 }));
 
 // streamText must not be reached when over budget; make it throw if called.
