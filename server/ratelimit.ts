@@ -101,8 +101,8 @@ export function getClientIp(req: Request): string {
   // server-side — the client cannot spoof them). x-forwarded-for is client-
   // appendable, so it's only a last resort for keying the rate limiter.
   const real = req.headers.get("x-real-ip") || req.headers.get("x-vercel-forwarded-for");
-  if (real) return real.split(",")[0].trim();
+  if (real) return (real.split(",")[0] ?? "").trim();
   const forwarded = req.headers.get("x-forwarded-for");
-  if (forwarded) return forwarded.split(",")[0].trim();
+  if (forwarded) return (forwarded.split(",")[0] ?? "").trim();
   return "unknown";
 }

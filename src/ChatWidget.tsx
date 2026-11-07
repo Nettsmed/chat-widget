@@ -741,7 +741,7 @@ export function ChatWidget({
       initialComment: string;
       showEmail: boolean;
       commentRequired: boolean;
-      flush?: boolean;
+      flush?: boolean | undefined;
       onSubmit: (draft: { email: string; comment: string }) => void;
     },
   ) => (

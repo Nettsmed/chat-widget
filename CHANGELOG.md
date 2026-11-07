@@ -4,6 +4,13 @@ All notable changes to `@nettsmed/chat-widget`. Format: Keep a Changelog + SemVe
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-07
+
+### Fixed
+- Consumers with `exactOptionalPropertyTypes` and `noUncheckedIndexedAccess` (e.g. nettsmed-plattform intern) no longer get type errors from the package sources: optional props accept `undefined` explicitly, optional headers are only passed when set, and indexed reads are guarded. The package's own `tsconfig.json` now enables both flags so this stays fixed.
+- The optional `@ai-sdk/openai` peer no longer breaks Next.js (Turbopack/webpack) builds when it is not installed: the lazy `require` is marked as ignored for bundlers.
+- `SmartTable` no longer computes a bar for a column without a numeric max.
+
 ## [0.9.0] - 2026-11-07
 
 ### Added

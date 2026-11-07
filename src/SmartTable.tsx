@@ -101,7 +101,7 @@ export function SmartTable({
             <tr key={r} className={`border-b ${borderCol} last:border-0`}>
               {Array.from({ length: cols }).map((_, c) => {
                 const raw = row[c] ?? "";
-                const max = colMax[c];
+                const max = colMax[c] ?? null;
                 if (max !== null) {
                   const v = parseNum(raw) ?? 0;
                   const pct = Math.max(2, Math.round((v / max) * 100));

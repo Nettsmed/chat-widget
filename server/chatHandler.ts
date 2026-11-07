@@ -142,7 +142,7 @@ function afterTurnResponse(
       writer.write({ type: "finish", finishReason });
     },
   });
-  return createUIMessageStreamResponse({ stream, headers });
+  return createUIMessageStreamResponse({ stream, ...(headers ? { headers } : {}) });
 }
 
 /**
@@ -374,6 +374,6 @@ export function createChatHandler(cfg: ChatHandlerConfig) {
       return afterTurnResponse(result, cfg, turnCtx, turn?.extraHeaders, onError);
     }
 
-    return result.toUIMessageStreamResponse({ headers: turn?.extraHeaders, onError });
+    return result.toUIMessageStreamResponse({ ...(turn?.extraHeaders ? { headers: turn.extraHeaders } : {}), onError });
   }
 }

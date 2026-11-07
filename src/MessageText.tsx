@@ -9,7 +9,7 @@ import { remarkAutoLinks, type AutoLink } from "./autoLinks";
 type Props = {
   text: string;
   tone: "bot" | "user";
-  linkTarget?: "_blank" | "_top";
+  linkTarget?: "_blank" | "_top" | undefined;
   /** Host of the parent page (from ?ctx). Same-host links navigate the parent
    *  (_top) so the chat follows along and the conversation continues there. */
   parentHost?: string;
