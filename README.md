@@ -81,6 +81,34 @@ void resolveChatModel; // also: resolveAnthropicModel (unchanged)
 void redactPII;        // generic email + Norwegian phone redaction
 ```
 
+### `afterTurn` (v0.9.0)
+
+Optional hook that runs after the model finishes and before the stream closes. Use it to write
+`data-*` parts (e.g. a stored plan the user can approve) that the client reads from `message.parts`.
+The stream order is: model parts, your `data-*` parts, `finish`. If the hook throws, the error goes to
+`onStreamError` and the stream still ends normally. Without the hook the response is unchanged.
+
+```ts
+afterTurn: async ({ text, steps, toolCalls, sessionId, writer }) => {
+  writer.write({ type: "data-plan", id: "plan-1", data: { ops: [] } });
+},
+```
+
+### `MessageText` autoLinks and sameOriginTarget (v0.9.0)
+
+```tsx
+<MessageText
+  text={text}
+  tone="bot"
+  autoLinks={[{ pattern: /\bNS-\d+\b/g, href: (m) => `/oppgaver/${m}` }]}
+  sameOriginTarget="_self"
+/>
+```
+
+`autoLinks` turns matches in plain text into links (not inside code or existing links; the `g` flag is
+optional). `sameOriginTarget` sets the target for root-relative links (`/x`, not `//x`); without it the
+existing link rules apply.
+
 ## Theming
 
 Brand colors are `--cw-*` CSS variables set from `config.colors` on the widget

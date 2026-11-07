@@ -1,5 +1,6 @@
 export { ChatWidget } from "./ChatWidget";
 export { MessageText } from "./MessageText";
+export type { AutoLink } from "./autoLinks";
 export { SmartTable } from "./SmartTable";
 export { LeadCaptureForm } from "./LeadCaptureForm";
 export { createBridgeClient } from "./siteBridgeClient";
