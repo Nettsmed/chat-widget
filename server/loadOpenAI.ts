@@ -10,5 +10,7 @@ export type OpenAIProviderModule = {
 
 /** Isolated so tests can stub the optional peer without installing it. */
 export function loadOpenAI(): OpenAIProviderModule {
-  return require("@ai-sdk/openai") as OpenAIProviderModule;
+  // Optional peer: a literal `require("@ai-sdk/openai")` is resolved by the consumer's bundler at build time (Turbopack
+  // and webpack fail the build when the package is not installed), so the bundler is told to leave this call alone.
+  return require(/* turbopackIgnore: true */ /* webpackIgnore: true */ "@ai-sdk/openai") as OpenAIProviderModule;
 }

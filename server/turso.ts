@@ -19,7 +19,7 @@ export type LogMessage = {
   content: string;
   referer?: string | null;
   /** Only persisted when provided (privacy default: omit). Requires an `ip` column. */
-  ip?: string | null;
+  ip?: string | null | undefined;
 };
 
 /**

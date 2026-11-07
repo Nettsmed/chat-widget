@@ -132,8 +132,8 @@ export function resolveTurnRoute(signaled: JevRoute | null, partsRoute: JevRoute
 }
 
 export function searchingStatusLabel(input?: {
-  parentHost?: string | null;
-  override?: string | null;
+  parentHost?: string | null | undefined;
+  override?: string | null | undefined;
 }): string {
   const custom = input?.override?.trim();
   if (custom) return custom;
@@ -156,7 +156,7 @@ export function transcriptWait(input: {
   messages: readonly WaitingMessage[];
   signaledRoute: JevRoute | null;
   parentHost?: string | null;
-  searchingLabel?: string | null;
+  searchingLabel?: string | null | undefined;
 }): TranscriptWait {
   if (!isWaitingForAssistantText(input.status, input.messages)) return { show: false };
   const last = input.messages[input.messages.length - 1];

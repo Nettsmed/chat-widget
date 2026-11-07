@@ -14,7 +14,7 @@ export type RequestInfo = {
   referer: string | null;
   page: PageInfo;
   ip: string;
-  faq?: boolean;
+  faq?: boolean | undefined;
 };
 
 /** Input to `logMessages` when it is a predicate. */

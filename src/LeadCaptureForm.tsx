@@ -22,7 +22,7 @@ export function LeadCaptureForm({
   busy: boolean;
   serverError: string | null;
   /** Drop the top rule when the form is the whole bubble. */
-  flush?: boolean;
+  flush?: boolean | undefined;
   onSubmit: (draft: { email: string; comment: string }) => void;
 }) {
   const emailId = useId();
