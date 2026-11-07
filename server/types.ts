@@ -46,6 +46,21 @@ export type CheckAnswerContext = PrepareTurnContext & {
   text: string;
 };
 
+/** Writes `data-*` parts into the UI message stream before it is closed. */
+export type TurnStreamWriter = {
+  write(part: { type: `data-${string}`; id?: string; data: unknown; transient?: boolean }): void;
+};
+
+export type AfterTurnContext = PrepareTurnContext & {
+  /** Assistant's final text (all steps). */
+  text: string;
+  /** Number of model steps in the turn. */
+  steps: number;
+  /** Tool names in call order, for metadata logging (never arguments). */
+  toolCalls: string[];
+  writer: TurnStreamWriter;
+};
+
 export type ChatHandlerConfig = {
   /** Model id, e.g. "claude-haiku-4-5-20251001" or an OpenAI model id. */
   model: string;
@@ -84,6 +99,12 @@ export type ChatHandlerConfig = {
     text: string,
     ctx: CheckAnswerContext,
   ) => unknown | Promise<unknown>;
+  /**
+   * Runs after the model finishes and before the stream closes. May write
+   * `data-*` parts (e.g. a plan) that the client reads from `message.parts`.
+   * A throw is reported via `onStreamError`; the stream still ends with `finish`.
+   */
+  afterTurn?: (ctx: AfterTurnContext) => void | Promise<void>;
   /**
    * When set, called with the raw body before JSON parse. Return false to
    * reject with 401 (signed/HMAC callers).

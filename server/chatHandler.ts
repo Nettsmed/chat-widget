@@ -1,14 +1,25 @@
-import { streamText, stepCountIs, convertToModelMessages, UI_MESSAGE_STREAM_HEADERS, type ToolSet, type UIMessage } from "ai";
+import {
+  streamText,
+  stepCountIs,
+  convertToModelMessages,
+  createUIMessageStream,
+  createUIMessageStreamResponse,
+  UI_MESSAGE_STREAM_HEADERS,
+  type ToolSet,
+  type UIMessage,
+} from "ai";
 import { checkRateLimit, getClientIp } from "./ratelimit";
 import { logMessage } from "./turso";
 import { resolveAccessContext as defaultResolveAccessContext } from "./access-context";
 import { resolveChatModel } from "./model";
 import { checkSpendCap, recordUsage } from "./spendcap";
 import type {
+  AfterTurnContext,
   ChatHandlerConfig,
   CheckAnswerContext,
   LogMessagesInfo,
   PageInfo,
+  PrepareTurnContext,
   PrepareTurnResult,
   RequestInfo,
 } from "./types";
@@ -78,6 +89,51 @@ function uiTextStreamResponse(message: string, id: string): Response {
     `data: ${JSON.stringify({ type: "finish", finishReason: "stop" })}\n\n` +
     `data: [DONE]\n\n`;
   return new Response(body, { status: 200, headers: UI_MESSAGE_STREAM_HEADERS });
+}
+
+type StreamTextResult = ReturnType<typeof streamText>;
+
+/**
+ * Streams the model's UI-message chunks (without `finish`), waits for the model
+ * to complete, runs `afterTurn` (which may write `data-*` parts), then sends
+ * `finish`. A throwing hook is reported and the stream still ends normally.
+ */
+function afterTurnResponse(
+  result: StreamTextResult,
+  cfg: ChatHandlerConfig,
+  turnCtx: PrepareTurnContext,
+  headers: Record<string, string> | undefined,
+  onError: (error: unknown) => string,
+): Response {
+  const stream = createUIMessageStream({
+    onError,
+    execute: async ({ writer }) => {
+      const reader = result.toUIMessageStream({ sendFinish: false, onError }).getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        writer.write(value);
+      }
+      let finishReason: "stop" | "length" | "content-filter" | "tool-calls" | "error" | "other" = "error";
+      try {
+        const [text, steps, reason] = await Promise.all([result.text, result.steps, result.finishReason]);
+        finishReason = reason;
+        const ctx: AfterTurnContext = {
+          ...turnCtx,
+          text,
+          steps: steps.length,
+          toolCalls: steps.flatMap((s) => s.toolCalls.map((c) => c.toolName)),
+          writer: { write: (part) => writer.write(part) },
+        };
+        await cfg.afterTurn?.(ctx);
+      } catch (err) {
+        console.error("[chat] afterTurn failed:", err);
+        cfg.onStreamError?.(err);
+      }
+      writer.write({ type: "finish", finishReason });
+    },
+  });
+  return createUIMessageStreamResponse({ stream, headers });
 }
 
 /**
@@ -297,14 +353,18 @@ export function createChatHandler(cfg: ChatHandlerConfig) {
       },
     });
 
-    return result.toUIMessageStreamResponse({
-      headers: turn?.extraHeaders,
-      onError: (error) => {
-        const msg = error instanceof Error ? error.message : String(error);
-        console.error("[chat] response error:", msg);
-        cfg.onStreamError?.(error);
-        return cfg.errorMessage;
-      },
-    });
+    const onError = (error: unknown) => {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error("[chat] response error:", msg);
+      cfg.onStreamError?.(error);
+      return cfg.errorMessage;
+    };
+
+    if (cfg.afterTurn) {
+      const turnCtx: PrepareTurnContext = { req, access, info, sessionId: sid, tools };
+      return afterTurnResponse(result, cfg, turnCtx, turn?.extraHeaders, onError);
+    }
+
+    return result.toUIMessageStreamResponse({ headers: turn?.extraHeaders, onError });
   }
 }

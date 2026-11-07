@@ -1,8 +1,10 @@
 "use client";
 
+import { useMemo } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { SmartTable } from "./SmartTable";
+import { remarkAutoLinks, type AutoLink } from "./autoLinks";
 
 type Props = {
   text: string;
@@ -11,7 +13,16 @@ type Props = {
   /** Host of the parent page (from ?ctx). Same-host links navigate the parent
    *  (_top) so the chat follows along and the conversation continues there. */
   parentHost?: string;
+  /** Patterns in the text that become links, e.g. `{ pattern: /\bNS-\d+\b/g, href: (m) => `/oppgaver/${m}` }`.
+   *  Not applied inside code or existing links. */
+  autoLinks?: readonly AutoLink[];
+  /** Target for root-relative links (`/x`, not `//x`). Without it the usual rule applies. */
+  sameOriginTarget?: "_self" | "_top";
 };
+
+function isRootRelative(href: string | undefined): href is string {
+  return !!href && href.startsWith("/") && !href.startsWith("//");
+}
 
 /** Same-site links → _top (parent navigates, chat stays open). External → fallback. */
 function resolveLink(
@@ -30,13 +41,24 @@ function resolveLink(
   return { target: fallback, rel: fallback === "_blank" ? "noopener noreferrer" : "noopener" };
 }
 
-export function MessageText({ text, tone, linkTarget = "_blank", parentHost }: Props) {
+export function MessageText({
+  text,
+  tone,
+  linkTarget = "_blank",
+  parentHost,
+  autoLinks,
+  sameOriginTarget,
+}: Props) {
+  const remarkPlugins = useMemo(
+    () => (autoLinks?.length ? [remarkGfm, remarkAutoLinks(autoLinks)] : [remarkGfm]),
+    [autoLinks],
+  );
   const linkColor = tone === "user" ? "text-white" : "text-[var(--cw-primary-hover)]";
   const strongColor = tone === "user" ? "text-white" : "text-[var(--cw-primary)]";
 
   return (
     <Markdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={remarkPlugins}
       components={{
         p: ({ children }) => (
           <p className="m-0 leading-[1.55] [&:not(:first-child)]:mt-2">{children}</p>
@@ -57,7 +79,10 @@ export function MessageText({ text, tone, linkTarget = "_blank", parentHost }: P
         ),
         li: ({ children }) => <li className="leading-[1.5]">{children}</li>,
         a: ({ children, href }) => {
-          const { target, rel } = resolveLink(href, parentHost, linkTarget);
+          const { target, rel } =
+            sameOriginTarget && isRootRelative(href)
+              ? { target: sameOriginTarget, rel: "noopener" }
+              : resolveLink(href, parentHost, linkTarget);
           return (
             <a
               href={href}

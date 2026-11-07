@@ -14,6 +14,7 @@ export {
 } from "./hmac";
 export type { Tier, AccessContext } from "./access-context";
 export type {
+  AfterTurnContext,
   ChatHandlerConfig,
   ChatProvider,
   CheckAnswerContext,
@@ -22,6 +23,7 @@ export type {
   PrepareTurnContext,
   PrepareTurnResult,
   RequestInfo,
+  TurnStreamWriter,
 } from "./types";
 export type { LogMessage } from "./turso";
 export type { RateLimitOptions } from "./ratelimit";

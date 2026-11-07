@@ -4,6 +4,12 @@ All notable changes to `@nettsmed/chat-widget`. Format: Keep a Changelog + SemVe
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-07
+
+### Added
+- `createChatHandler` `afterTurn?(ctx)` hook (backward compatible; omit it for v0.8.0 behavior). Runs after the model is done and before the stream closes, with `text`, `steps`, `toolCalls` (names only) and a `writer` that can emit `data-*` parts the client reads from `message.parts` (e.g. a plan awaiting approval). Stream order: model parts, `data-*` parts, `finish`. A throwing hook is logged, reported via `onStreamError`, and the stream still ends with `finish`. New types `AfterTurnContext` and `TurnStreamWriter` exported from `./server`.
+- `MessageText` `autoLinks` prop: patterns in plain text become links (not inside code or existing links). `MessageText` `sameOriginTarget` prop (`"_self" | "_top"`): target for root-relative links (`/x`). `AutoLink` type exported from the package root.
+
 ## [0.8.0] - 2026-10-05
 
 ### Added
