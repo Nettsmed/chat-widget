@@ -4,6 +4,11 @@ All notable changes to `@nettsmed/chat-widget`. Format: Keep a Changelog + SemVe
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-11-07
+
+### Security
+- `MessageText` never loads images from model output. A markdown image (`![alt](url)`) renders as a link («Bilde: alt») the user has to click, with no `<img>` and no preload. An image URL in an answer could otherwise carry data out of the host app without any click (prompt injection through tool data).
+
 ## [0.9.1] - 2026-11-07
 
 ### Fixed
