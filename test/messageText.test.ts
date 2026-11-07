@@ -82,3 +82,25 @@ describe("MessageText sameOriginTarget", () => {
     expect(a?.getAttribute("href") ?? "").not.toContain("javascript");
   });
 });
+
+describe("MessageText images", () => {
+  it("never renders an <img> or preload for markdown images, only a link to click", () => {
+    const html = renderToStaticMarkup(
+      createElement(MessageText, { text: "Se ![kvittering](https://evil.example/p.png?d=NS-195) her", tone: "bot" }),
+    );
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("preload");
+    const root = document.createElement("div");
+    root.innerHTML = html;
+    const a = root.querySelectorAll("a");
+    expect(a).toHaveLength(1);
+    expect(a[0].getAttribute("href")).toBe("https://evil.example/p.png?d=NS-195");
+    expect(a[0].textContent).toBe("Bilde: kvittering");
+  });
+
+  it("an image with a javascript: URL gets no href", () => {
+    const html = renderToStaticMarkup(createElement(MessageText, { text: "![x](javascript:alert(1))", tone: "bot" }));
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("javascript:");
+  });
+});

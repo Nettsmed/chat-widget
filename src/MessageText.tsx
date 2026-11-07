@@ -115,6 +115,19 @@ export function MessageText({
           </code>
         ),
         hr: () => <hr className="my-3 border-current/15" />,
+        // Model output must never load a remote resource on its own: an image URL can carry data out
+        // (prompt injection via tool data). Images render as a plain link the user has to click.
+        img: ({ src, alt }) => {
+          const href = typeof src === "string" ? src : undefined;
+          const label = alt?.trim() ? `Bilde: ${alt.trim()}` : "Bilde";
+          if (!href) return <span>{label}</span>;
+          const { target, rel } = resolveLink(href, parentHost, linkTarget);
+          return (
+            <a href={href} target={target} rel={rel} className={`underline underline-offset-2 ${linkColor} hover:opacity-80`}>
+              {label}
+            </a>
+          );
+        },
         table: ({ node }) => <SmartTable node={node} tone={tone} />,
       }}
     >
