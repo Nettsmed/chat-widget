@@ -103,6 +103,7 @@ export type ChatHandlerConfig = {
    * Runs after the model finishes and before the stream closes. May write
    * `data-*` parts (e.g. a plan) that the client reads from `message.parts`.
    * A throw is reported via `onStreamError`; the stream still ends with `finish`.
+   * Runs even if the client has disconnected, and on a failed model turn (empty `text`).
    */
   afterTurn?: (ctx: AfterTurnContext) => void | Promise<void>;
   /**

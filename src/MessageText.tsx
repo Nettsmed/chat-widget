@@ -14,7 +14,7 @@ type Props = {
    *  (_top) so the chat follows along and the conversation continues there. */
   parentHost?: string;
   /** Patterns in the text that become links, e.g. `{ pattern: /\bNS-\d+\b/g, href: (m) => `/oppgaver/${m}` }`.
-   *  Not applied inside code or existing links. */
+   *  Not applied inside code or existing links. Pass a stable (module-level) array: a new array rebuilds the plugin. */
   autoLinks?: readonly AutoLink[];
   /** Target for root-relative links (`/x`, not `//x`). Without it the usual rule applies. */
   sameOriginTarget?: "_self" | "_top";

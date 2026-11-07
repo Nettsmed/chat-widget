@@ -183,4 +183,37 @@ describe("afterTurn", () => {
     expect(res.headers.get("X-Test")).toBe("1");
     await res.text();
   });
+
+  it("a failing model is reported like the plain path and never as an afterTurn failure", async () => {
+    vi.mocked(console.error).mockClear();
+    resolveChatModel.mockReturnValue(
+      new MockLanguageModelV3({
+        doStream: async () => ({
+          stream: chunks([
+            { type: "stream-start", warnings: [] },
+            { type: "error", error: new Error("overloaded") },
+          ]),
+        }),
+      }),
+    );
+    const onStreamError = vi.fn();
+    const afterTurn = vi.fn();
+    const handler = createChatHandler({ ...base, onStreamError, afterTurn });
+    const t = types(await readParts(await handler(req())));
+    // ai v6 resolves text/steps on a model error, so the hook may still run with an empty turn.
+    expect(afterTurn.mock.calls.every(([ctx]) => ctx.text === "")).toBe(true);
+    // Same count as the plain path without afterTurn: the hook adds no extra report.
+    const plainErr = vi.fn();
+    resolveChatModel.mockReturnValue(
+      new MockLanguageModelV3({
+        doStream: async () => ({
+          stream: chunks([{ type: "stream-start", warnings: [] }, { type: "error", error: new Error("overloaded") }]),
+        }),
+      }),
+    );
+    await readParts(await createChatHandler({ ...base, onStreamError: plainErr })(req()));
+    expect(onStreamError).toHaveBeenCalledTimes(plainErr.mock.calls.length);
+    expect(t.slice(-2)).toEqual(["finish", "[DONE]"]);
+    expect(vi.mocked(console.error).mock.calls.some((c) => String(c[0]).includes("afterTurn failed"))).toBe(false);
+  });
 });
