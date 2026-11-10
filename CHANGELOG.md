@@ -4,6 +4,15 @@ All notable changes to `@nettsmed/chat-widget`. Format: Keep a Changelog + SemVe
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-10
+
+### Added
+- Additions only, no breaking changes: a handler that sets none of these behaves exactly as v0.9.2.
+- `createChatHandler` `providerOptions?`: passed to `streamText({ providerOptions })` (e.g. `{ anthropic: { effort: "low", thinking: { type: "disabled" } } }`). Typed as the AI SDK's own provider options (`ChatProviderOptions`).
+- `createChatHandler` `cacheTtl?: "5m" | "1h"`: sets `ttl` on the system-message cache breakpoint (Anthropic only). Unset keeps `{ type: "ephemeral" }` with no `ttl`.
+- `prepareTurn` may return `model?` and `provider?` for that turn only.
+- `AfterTurnContext` gains `model`, `provider`, `usage?` (`inputTokens`, `cachedInputTokens`, `outputTokens`, summed across steps), `firstTextMs?` and `totalMs`. New type `ChatTurnUsage`.
+
 ## [0.9.2] - 2026-11-07
 
 ### Security

@@ -6,6 +6,7 @@ import {
   createUIMessageStreamResponse,
   UI_MESSAGE_STREAM_HEADERS,
   type FinishReason,
+  type LanguageModelUsage,
   type ToolSet,
   type UIMessage,
 } from "ai";
@@ -18,6 +19,8 @@ import type {
   AfterTurnContext,
   ChatHandlerConfig,
   CheckAnswerContext,
+  ChatProvider,
+  ChatTurnUsage,
   LogMessagesInfo,
   PageInfo,
   PrepareTurnContext,
@@ -94,6 +97,17 @@ function uiTextStreamResponse(message: string, id: string): Response {
 
 type StreamTextResult = ReturnType<typeof streamText>;
 
+/** Per-turn timing and identity, carried into the `afterTurn` context. */
+type TurnMeta = { model: string; provider: ChatProvider; startedAt: number };
+
+function toTurnUsage(u: LanguageModelUsage): ChatTurnUsage {
+  return {
+    inputTokens: u.inputTokens,
+    cachedInputTokens: u.inputTokenDetails?.cacheReadTokens ?? u.cachedInputTokens,
+    outputTokens: u.outputTokens,
+  };
+}
+
 /**
  * Streams the model's UI-message chunks (without `finish`), waits for the model
  * to complete, runs `afterTurn` (which may write `data-*` parts), then sends
@@ -103,6 +117,7 @@ function afterTurnResponse(
   result: StreamTextResult,
   cfg: ChatHandlerConfig,
   turnCtx: PrepareTurnContext,
+  meta: TurnMeta,
   headers: Record<string, string> | undefined,
   onError: (error: unknown) => string,
 ): Response {
@@ -110,17 +125,29 @@ function afterTurnResponse(
     onError,
     execute: async ({ writer }) => {
       const reader = result.toUIMessageStream({ sendFinish: false, onError }).getReader();
+      let firstTextMs: number | undefined;
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
+        if (firstTextMs === undefined && value.type === "text-delta") firstTextMs = Date.now() - meta.startedAt;
         writer.write(value);
       }
+      const totalMs = Date.now() - meta.startedAt;
       let finishReason: FinishReason = "error";
-      let done: { text: string; steps: Awaited<StreamTextResult["steps"]> } | null = null;
+      let done: {
+        text: string;
+        steps: Awaited<StreamTextResult["steps"]>;
+        usage: LanguageModelUsage;
+      } | null = null;
       try {
-        const [text, steps, reason] = await Promise.all([result.text, result.steps, result.finishReason]);
+        const [text, steps, reason, usage] = await Promise.all([
+          result.text,
+          result.steps,
+          result.finishReason,
+          result.totalUsage,
+        ]);
         finishReason = reason;
-        done = { text, steps };
+        done = { text, steps, usage };
       } catch {
         // The model stream failed; `onError` above already reported it. Skip the hook.
       }
@@ -131,6 +158,11 @@ function afterTurnResponse(
             text: done.text,
             steps: done.steps.length,
             toolCalls: done.steps.flatMap((s) => s.toolCalls.map((c) => c.toolName)),
+            model: meta.model,
+            provider: meta.provider,
+            usage: toTurnUsage(done.usage),
+            firstTextMs,
+            totalMs,
             writer: { write: (part) => writer.write(part) },
           };
           await cfg.afterTurn?.(ctx);
@@ -175,6 +207,7 @@ export function createChatHandler(cfg: ChatHandlerConfig) {
   };
 
   async function handle(req: Request): Promise<Response> {
+    const startedAt = Date.now();
     const ip = getClientIp(req);
     if (!(await checkRateLimit(ip, cfg.rateLimit))) {
       return new Response("Rate limit exceeded", { status: 429 });
@@ -291,17 +324,25 @@ export function createChatHandler(cfg: ChatHandlerConfig) {
     const pageBlock = cfg.buildPageBlock?.(page) ?? "";
     const extraBlock = turn?.extraSystemBlock ?? "";
 
+    // Per-turn model/provider; never stored outside this call, so it cannot leak into the next turn.
+    const turnProvider = turn?.provider ?? provider;
+    const turnModel = turn?.model ?? cfg.model;
+    // The tenant key belongs to the handler's provider; do not send it to another one.
+    const turnApiKey = turnProvider === provider ? cfg.apiKey : undefined;
+
+    type CacheControl = { type: "ephemeral"; ttl?: "5m" | "1h" };
     type SystemMsg = {
       role: "system";
       content: string;
-      providerOptions?: { anthropic: { cacheControl: { type: "ephemeral" } } };
+      providerOptions?: { anthropic: { cacheControl: CacheControl } };
     };
+    const cacheControl: CacheControl = cfg.cacheTtl
+      ? { type: "ephemeral", ttl: cfg.cacheTtl }
+      : { type: "ephemeral" };
     const cachedSystem: SystemMsg = {
       role: "system",
       content: systemPrompt,
-      ...(provider === "anthropic"
-        ? { providerOptions: { anthropic: { cacheControl: { type: "ephemeral" as const } } } }
-        : {}),
+      ...(turnProvider === "anthropic" ? { providerOptions: { anthropic: { cacheControl } } } : {}),
     };
 
     const systemMessages: SystemMsg[] = [cachedSystem];
@@ -313,7 +354,8 @@ export function createChatHandler(cfg: ChatHandlerConfig) {
     }
 
     const result = streamText({
-      model: resolveChatModel(cfg.model, provider, cfg.apiKey),
+      model: resolveChatModel(turnModel, turnProvider, turnApiKey),
+      ...(cfg.providerOptions ? { providerOptions: cfg.providerOptions } : {}),
       // Cache the (large, stable) system prompt via a cache breakpoint on the
       // system message — top-level providerOptions does NOT cache the system
       // string. Cuts input tokens ~70% on repeat turns. Page / per-turn blocks
@@ -371,7 +413,8 @@ export function createChatHandler(cfg: ChatHandlerConfig) {
 
     if (cfg.afterTurn) {
       const turnCtx: PrepareTurnContext = { req, access, info, sessionId: sid, tools };
-      return afterTurnResponse(result, cfg, turnCtx, turn?.extraHeaders, onError);
+      const meta: TurnMeta = { model: turnModel, provider: turnProvider, startedAt };
+      return afterTurnResponse(result, cfg, turnCtx, meta, turn?.extraHeaders, onError);
     }
 
     return result.toUIMessageStreamResponse({ ...(turn?.extraHeaders ? { headers: turn.extraHeaders } : {}), onError });
