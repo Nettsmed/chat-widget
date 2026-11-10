@@ -257,3 +257,38 @@ describe("RequestInfo extensions", () => {
     );
   });
 });
+
+describe("v0.10 model options", () => {
+  it("prepareTurn model applies to that turn only", async () => {
+    let n = 0;
+    const handler = createChatHandler({
+      ...v07Config,
+      prepareTurn: () => (n++ === 0 ? { model: "claude-sonnet-5-5" } : undefined),
+    });
+    await handler(req({ messages: [userMsg] }));
+    await handler(req({ messages: [userMsg] }));
+    expect(resolveChatModel.mock.calls[0]).toEqual(["claude-sonnet-5-5", "anthropic", undefined]);
+    expect(resolveChatModel.mock.calls[1]).toEqual(["claude-haiku-4-5", "anthropic", undefined]);
+  });
+
+  it("passes providerOptions and cacheTtl 1h to streamText", async () => {
+    const providerOptions = { anthropic: { effort: "low", thinking: { type: "disabled" } } };
+    const handler = createChatHandler({ ...v07Config, providerOptions, cacheTtl: "1h" });
+    await handler(req({ messages: [userMsg] }));
+    const args = lastStreamArgs() as ReturnType<typeof lastStreamArgs> & { providerOptions?: unknown };
+    expect(args.providerOptions).toEqual(providerOptions);
+    expect(args.messages[0]?.providerOptions).toEqual({
+      anthropic: { cacheControl: { type: "ephemeral", ttl: "1h" } },
+    });
+  });
+
+  it("with neither option set, call args match v0.9.2", async () => {
+    const handler = createChatHandler(v07Config);
+    await handler(req({ messages: [userMsg] }));
+    const args = lastStreamArgs();
+    expect("providerOptions" in args).toBe(false);
+    expect(args.messages[0]?.providerOptions).toStrictEqual({
+      anthropic: { cacheControl: { type: "ephemeral" } },
+    });
+  });
+});

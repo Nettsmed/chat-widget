@@ -1,8 +1,11 @@
-import type { ToolSet, UIMessage } from "ai";
+import type { streamText, ToolSet, UIMessage } from "ai";
 import type { AccessContext } from "./access-context";
 import type { SpendCapOptions } from "./spendcap";
 
 export type ChatProvider = "anthropic" | "openai";
+
+/** The AI SDK's own provider-options type (`{ [provider]: { ...options } }`). */
+export type ChatProviderOptions = NonNullable<Parameters<typeof streamText>[0]["providerOptions"]>;
 
 export type PageInfo = {
   url: string;
@@ -40,6 +43,10 @@ export type PrepareTurnResult = {
    * The engine does not run search; the host decides the flag and the tool key.
    */
   disableSearchTool?: boolean;
+  /** Model id for this turn only. Omitted: the handler's `model`. */
+  model?: string | undefined;
+  /** Provider for this turn only. Omitted: the handler's `provider`. */
+  provider?: ChatProvider | undefined;
 };
 
 export type CheckAnswerContext = PrepareTurnContext & {
@@ -51,6 +58,12 @@ export type TurnStreamWriter = {
   write(part: { type: `data-${string}`; id?: string; data: unknown; transient?: boolean }): void;
 };
 
+export type ChatTurnUsage = {
+  inputTokens?: number | undefined;
+  cachedInputTokens?: number | undefined;
+  outputTokens?: number | undefined;
+};
+
 export type AfterTurnContext = PrepareTurnContext & {
   /** Assistant's final text (all steps). */
   text: string;
@@ -58,6 +71,16 @@ export type AfterTurnContext = PrepareTurnContext & {
   steps: number;
   /** Tool names in call order, for metadata logging (never arguments). */
   toolCalls: string[];
+  /** Model id actually used this turn (per-turn override or handler model). */
+  model: string;
+  /** Provider actually used this turn. */
+  provider: ChatProvider;
+  /** Token counts summed across steps. Fields are undefined when the provider does not report them. */
+  usage?: ChatTurnUsage | undefined;
+  /** Ms from request start to the first `text-delta`; undefined when the turn produced no text. */
+  firstTextMs?: number | undefined;
+  /** Ms from request start to the end of the model stream. */
+  totalMs: number;
   writer: TurnStreamWriter;
 };
 
@@ -66,6 +89,14 @@ export type ChatHandlerConfig = {
   model: string;
   /** Inference provider. Default `"anthropic"` (v0.7.x behavior). */
   provider?: ChatProvider;
+  /**
+   * Passed straight to `streamText({ providerOptions })`, e.g.
+   * `{ anthropic: { effort: "low", thinking: { type: "disabled" } } }`.
+   * Message-level cache control on the system message is separate and unaffected.
+   */
+  providerOptions?: ChatProviderOptions | undefined;
+  /** Cache lifetime of the system-prompt breakpoint (Anthropic only). Unset: Anthropic's default (5m). */
+  cacheTtl?: "5m" | "1h" | undefined;
   /** Build the system prompt from fetched content + current page context. */
   buildSystemPrompt: (content: string, page: PageInfo) => string;
   /**

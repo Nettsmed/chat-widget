@@ -130,6 +130,24 @@ describe("afterTurn", () => {
     expect(seen?.info.page).toEqual({ url: "", title: "" });
   });
 
+  it("passes model, provider, usage and timings to afterTurn", async () => {
+    resolveChatModel.mockReturnValue(toolThenTextModel());
+    let seen: AfterTurnContext | undefined;
+    const handler = createChatHandler({
+      ...base,
+      prepareTurn: () => ({ model: "turn-model" }),
+      afterTurn: (ctx) => {
+        seen = ctx;
+      },
+    });
+    await (await handler(req())).text();
+    expect(seen?.model).toBe("turn-model");
+    expect(seen?.provider).toBe("anthropic");
+    expect(seen?.usage).toEqual({ inputTokens: 6, cachedInputTokens: 0, outputTokens: 20 });
+    expect(seen?.firstTextMs).toBeTypeOf("number");
+    expect(seen?.totalMs).toBeGreaterThanOrEqual(seen?.firstTextMs ?? Infinity);
+  });
+
   it("still runs onFinish logic (spend cap, assistant log, checkAnswer)", async () => {
     resolveChatModel.mockReturnValue(toolThenTextModel());
     const checkAnswer = vi.fn();

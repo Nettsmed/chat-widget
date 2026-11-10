@@ -94,6 +94,37 @@ afterTurn: async ({ text, steps, toolCalls, sessionId, writer }) => {
 },
 ```
 
+### Model options, model per turn, usage and timings (v0.10.0)
+
+All optional; without them the handler behaves exactly as v0.9.2.
+
+`providerOptions` goes straight to `streamText` (e.g. turn thinking off to cut time to first text):
+
+```ts
+providerOptions: { anthropic: { thinking: { type: "disabled" }, effort: "low" } },
+```
+
+`cacheTtl` sets the lifetime of the system-prompt cache breakpoint (Anthropic only; unset keeps the default):
+
+```ts
+cacheTtl: "1h", // "5m" | "1h"
+```
+
+`prepareTurn` may return `model` and/or `provider` for that turn only (omitted: the handler's own):
+
+```ts
+prepareTurn: ({ info }) => (info.faq ? { model: "claude-haiku-4-5-20251001" } : undefined),
+```
+
+`afterTurn` also receives `model`, `provider`, `usage` (summed across steps), `firstTextMs` (request start
+to first text, undefined when no text) and `totalMs`:
+
+```ts
+afterTurn: ({ model, usage, firstTextMs, totalMs }) => {
+  log({ model, ...usage, firstTextMs, totalMs }); // usage: inputTokens, cachedInputTokens, outputTokens
+},
+```
+
 ### `MessageText` autoLinks and sameOriginTarget (v0.9.0)
 
 ```tsx
