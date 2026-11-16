@@ -164,6 +164,10 @@ export type ChatHandlerConfig = {
   /** Called on a stream/response error so the app can report it (e.g. Sentry).
    *  The package stays Sentry-agnostic; the app wires the reporter. */
   onStreamError?: (err: unknown) => void;
+  /** PostHog LLM analytics. When set, each finished turn sends one server-side `$ai_generation` event
+   *  (model, provider, token counts, latency, session id, tenant; no message content, no IP).
+   *  Default host https://eu.i.posthog.com. Failures go to `onStreamError`, never the stream. */
+  posthog?: { apiKey: string; host?: string; tenant?: string };
   /** Max tool-call steps. Default 3. */
   stepCount?: number;
   /** Abuse guards. Defaults: 30 / 4000 / 16000. */

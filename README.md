@@ -125,6 +125,20 @@ afterTurn: ({ model, usage, firstTextMs, totalMs }) => {
 },
 ```
 
+### PostHog `$ai_generation` events (v0.11.0)
+
+Optional. With `posthog` set, each finished assistant turn sends one server-side `$ai_generation` event, so
+PostHog LLM analytics shows cost per conversation and tenant. It carries model, provider, token counts, latency
+(seconds), `$ai_trace_id` (the chat session id) and `tenant`. It never carries message content and no IP;
+`distinct_id` is the session id, with `$process_person_profile: false` and `$geoip_disable: true`.
+
+```ts
+posthog: { apiKey: process.env.POSTHOG_KEY!, host: "https://eu.i.posthog.com", tenant: "acme" }, // host, tenant optional
+```
+
+Fire-and-forget over plain `fetch` (no dependency). A failure is passed to `onStreamError`; the stream is
+never delayed or broken. Without `posthog` nothing is sent.
+
 ### `MessageText` autoLinks and sameOriginTarget (v0.9.0)
 
 ```tsx

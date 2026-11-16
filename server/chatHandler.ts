@@ -14,6 +14,7 @@ import { checkRateLimit, getClientIp } from "./ratelimit";
 import { logMessage } from "./turso";
 import { resolveAccessContext as defaultResolveAccessContext } from "./access-context";
 import { resolveChatModel } from "./model";
+import { sendGenerationEvent } from "./posthog";
 import { checkSpendCap, recordUsage } from "./spendcap";
 import type {
   AfterTurnContext,
@@ -366,6 +367,19 @@ export function createChatHandler(cfg: ChatHandlerConfig) {
       onFinish: async ({ text, totalUsage }) => {
         if (cfg.spendCap && totalUsage?.totalTokens) {
           recordUsage(cfg.spendCap, totalUsage.totalTokens);
+        }
+        if (cfg.posthog && totalUsage) {
+          sendGenerationEvent(
+            cfg.posthog,
+            {
+              sessionId: sid,
+              model: turnModel,
+              provider: turnProvider,
+              usage: toTurnUsage(totalUsage),
+              latencyMs: Date.now() - startedAt,
+            },
+            cfg.onStreamError,
+          );
         }
         if (persist && text && last) {
           logMessage({

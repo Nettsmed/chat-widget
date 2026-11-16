@@ -4,6 +4,11 @@ All notable changes to `@nettsmed/chat-widget`. Format: Keep a Changelog + SemVe
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-16
+
+### Added
+- `createChatHandler` `posthog?: { apiKey, host?, tenant? }`: each finished assistant turn sends one server-side PostHog `$ai_generation` event (model, provider, token counts, latency, session id as trace id, tenant) for cost per conversation. No message content, no IP, no person profile. Fire-and-forget; failures go to `onStreamError`. Handlers without `posthog` are unchanged.
+
 ## [0.10.0] - 2026-11-10
 
 ### Added
