@@ -110,3 +110,63 @@ describe("posthog $ai_generation", () => {
     expect(onStreamError).toHaveBeenCalledTimes(1);
   });
 });
+
+import { maskPii } from "../server/posthog";
+
+describe("maskPii", () => {
+  const cases: [string, string][] = [
+    ["mail meg på ola.nordmann@firma.no takk", "mail meg på [e-post] takk"],
+    ["ring 91234567", "ring [telefon]"],
+    ["ring +47 912 34 567", "ring [telefon]"],
+    ["ring 0047 91234567", "ring [telefon]"],
+    ["ring 912 34 567", "ring [telefon]"],
+    ["ring 91 23 45 67", "ring [telefon]"],
+    ["ring +46 70 123 45 67", "ring [telefon]"],
+    ["org 123456789", "org [org.nr]"],
+    ["org 123 456 789", "org [org.nr]"],
+    ["kort 4111 1111 1111 1111", "kort [nummer]"],
+    ["konto 1234-56-78901", "konto [nummer]"],
+    ["Den koster 699 kr", "Den koster 699 kr"],
+    ["Den koster 4 799 kr", "Den koster 4 799 kr"],
+    ["Fra 1 790 per måned", "Fra 1 790 per måned"],
+    ["Siden 2024 og 2025", "Siden 2024 og 2025"],
+  ];
+  it.each(cases)("%s", (input, expected) => {
+    expect(maskPii(input)).toBe(expected);
+  });
+});
+
+describe("posthog captureContent", () => {
+  it("sends masked input and output, no system prompt", async () => {
+    const r = new Request("https://x/api/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sessionId: "sess-1",
+        messages: [
+          { id: "1", role: "user", parts: [{ type: "text", text: "mail ola@firma.no, ring 91234567. Pris?" }] },
+        ],
+      }),
+    });
+    const cfg = { ...base, buildSystemPrompt: () => "SECRET-SYSTEM", posthog: { apiKey: "k", captureContent: true } };
+    await createChatHandler(cfg)(r);
+    const args = streamText.mock.calls[0][0] as { onFinish: (a: unknown) => Promise<void> };
+    await args.onFinish({ text: "Send til kari@x.no. Den koster 699 kr " + "a".repeat(5000), totalUsage: usage });
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
+    expect(body.properties.$ai_input).toEqual([{ role: "user", content: "mail [e-post], ring [telefon]. Pris?" }]);
+    const out = body.properties.$ai_output_choices;
+    expect(out).toHaveLength(1);
+    expect(out[0].role).toBe("assistant");
+    expect(out[0].content.startsWith("Send til [e-post]. Den koster 699 kr ")).toBe(true);
+    expect(out[0].content.length).toBe(4000);
+    expect(JSON.stringify(body)).not.toContain("SECRET-SYSTEM");
+    expect(JSON.stringify(body)).not.toContain("ola@firma.no");
+  });
+
+  it("unset: no content keys", async () => {
+    await finish({ ...base, posthog: { apiKey: "k" } });
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
+    expect(body.properties).not.toHaveProperty("$ai_input");
+    expect(body.properties).not.toHaveProperty("$ai_output_choices");
+  });
+});

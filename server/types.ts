@@ -166,8 +166,10 @@ export type ChatHandlerConfig = {
   onStreamError?: (err: unknown) => void;
   /** PostHog LLM analytics. When set, each finished turn sends one server-side `$ai_generation` event
    *  (model, provider, token counts, latency, session id, tenant; no message content, no IP).
-   *  Default host https://eu.i.posthog.com. Failures go to `onStreamError`, never the stream. */
-  posthog?: { apiKey: string; host?: string; tenant?: string };
+   *  Default host https://eu.i.posthog.com. Failures go to `onStreamError`, never the stream.
+   *  `captureContent: true` (default false) adds the latest user message and the final answer, PII-masked and
+   *  cut to 4000 chars; never the system prompt, knowledge or tool output. */
+  posthog?: { apiKey: string; host?: string; tenant?: string; captureContent?: boolean };
   /** Max tool-call steps. Default 3. */
   stepCount?: number;
   /** Abuse guards. Defaults: 30 / 4000 / 16000. */

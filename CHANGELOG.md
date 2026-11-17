@@ -4,6 +4,12 @@ All notable changes to `@nettsmed/chat-widget`. Format: Keep a Changelog + SemVe
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-17
+
+### Added
+- `posthog.captureContent?: boolean` (default false): the `$ai_generation` event also carries `$ai_input` (the latest user message) and `$ai_output_choices` (the final assistant text), PII-masked and cut to 4000 chars. Never the system prompt, knowledge or tool output. Unset keeps the payload identical to v0.11.0.
+- `maskPii(text)` exported from `/server`: masks emails, phone numbers, org numbers and long digit runs; leaves prices and years.
+
 ## [0.11.0] - 2026-11-16
 
 ### Added

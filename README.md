@@ -139,6 +139,22 @@ posthog: { apiKey: process.env.POSTHOG_KEY!, host: "https://eu.i.posthog.com", t
 Fire-and-forget over plain `fetch` (no dependency). A failure is passed to `onStreamError`; the stream is
 never delayed or broken. Without `posthog` nothing is sent.
 
+#### Opt-in message content: `captureContent` (v0.12.0)
+
+```ts
+posthog: { apiKey: process.env.POSTHOG_KEY!, captureContent: true } // default false
+```
+
+With `captureContent: true` the event also carries `$ai_input` (the user's latest message only, as
+`[{ role: "user", content }]`) and `$ai_output_choices` (the final assistant text). **This sends message content,
+masked, to PostHog.** Check that your privacy notice and data processing agreement cover it. Never included:
+system prompt, retrieved knowledge, tool output. Each field is cut to 4000 characters.
+
+Masking (`maskPii`, also exported from `/server`) runs before sending: emails become `[e-post]`, phone numbers
+(Norwegian 8 digits with optional `+47`/`0047`, any `+<digits>`) `[telefon]`, Norwegian org numbers `[org.nr]`, and
+runs of 11+ digits (card/account numbers) `[nummer]`. Prices such as "4 799 kr" and years are left alone. Masking
+is pattern-based and best effort: names and free-text addresses are not masked.
+
 ### `MessageText` autoLinks and sameOriginTarget (v0.9.0)
 
 ```tsx
