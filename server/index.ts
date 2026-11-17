@@ -7,6 +7,7 @@ export { setBackgroundRunner, runBackground } from "./scheduler";
 export { resolveAnthropicModel, resolveChatModel } from "./model";
 export { checkSpendCap, recordUsage } from "./spendcap";
 export { redactPII } from "./redact";
+export { maskPii } from "./posthog";
 export {
   hmacSha256Hex,
   timestampedHmacMessage,

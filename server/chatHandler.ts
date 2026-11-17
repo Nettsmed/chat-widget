@@ -377,6 +377,9 @@ export function createChatHandler(cfg: ChatHandlerConfig) {
               provider: turnProvider,
               usage: toTurnUsage(totalUsage),
               latencyMs: Date.now() - startedAt,
+              ...(cfg.posthog.captureContent
+                ? { inputText: last && last.role === "user" ? textFromMessage(last) : "", outputText: text }
+                : {}),
             },
             cfg.onStreamError,
           );
