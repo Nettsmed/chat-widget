@@ -130,6 +130,23 @@ describe("maskPii", () => {
     ["Den koster 4 799 kr", "Den koster 4 799 kr"],
     ["Fra 1 790 per måned", "Fra 1 790 per måned"],
     ["Siden 2024 og 2025", "Siden 2024 og 2025"],
+    // Nettsmed public contacts stay readable in PostHog logs
+    ["Skriv til post@nettsmed.no", "Skriv til post@nettsmed.no"],
+    ["Skriv til sindre@nettsmed.no", "Skriv til sindre@nettsmed.no"],
+    ["Ring 466 92 611", "Ring 466 92 611"],
+    ["Ring +47 466 92 611", "Ring +47 466 92 611"],
+    ["Ring 0047 46692611", "Ring 0047 46692611"],
+    ["Ring 46692611", "Ring 46692611"],
+    ["org.nr 934297571", "org.nr 934297571"],
+    ["org.nr 934 297 571", "org.nr 934 297 571"],
+    ["mailto:post@nettsmed.no", "mailto:post@nettsmed.no"],
+    ["tel:46692611", "tel:46692611"],
+    ["tel:+4746692611", "tel:+4746692611"],
+    // Visitor PII still masked beside Nettsmed contacts
+    [
+      "Besøkende ola@firma.no / 91234567. Vi: post@nettsmed.no / 466 92 611 / 934297571",
+      "Besøkende [e-post] / [telefon]. Vi: post@nettsmed.no / 466 92 611 / 934297571",
+    ],
   ];
   it.each(cases)("%s", (input, expected) => {
     expect(maskPii(input)).toBe(expected);

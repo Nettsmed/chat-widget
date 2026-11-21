@@ -4,6 +4,11 @@ All notable changes to `@nettsmed/chat-widget`. Format: Keep a Changelog + SemVe
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-11-21
+
+### Fixed
+- `maskPii` and `redactPII` preserve Nettsmed's public contact details (`post@nettsmed.no`, `sindre@nettsmed.no`, phone `466 92 611` in common formats including `mailto:` / `tel:`, and org.nr `934297571`). Visitor emails, phones and other org numbers are still masked.
+
 ## [0.12.0] - 2026-11-17
 
 ### Added

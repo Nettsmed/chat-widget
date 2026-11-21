@@ -152,8 +152,9 @@ system prompt, retrieved knowledge, tool output. Each field is cut to 4000 chara
 
 Masking (`maskPii`, also exported from `/server`) runs before sending: emails become `[e-post]`, phone numbers
 (Norwegian 8 digits with optional `+47`/`0047`, any `+<digits>`) `[telefon]`, Norwegian org numbers `[org.nr]`, and
-runs of 11+ digits (card/account numbers) `[nummer]`. Prices such as "4 799 kr" and years are left alone. Masking
-is pattern-based and best effort: names and free-text addresses are not masked.
+runs of 11+ digits (card/account numbers) `[nummer]`. Prices such as "4 799 kr" and years are left alone. Nettsmed's
+own public contacts (`post@` / `sindre@nettsmed.no`, `466 92 611`, org.nr `934297571`) are preserved so logs stay
+readable. Masking is pattern-based and best effort: names and free-text addresses are not masked.
 
 ### `MessageText` autoLinks and sameOriginTarget (v0.9.0)
 

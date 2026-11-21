@@ -1,4 +1,10 @@
 import type { ChatTurnUsage } from "./types";
+import {
+  isPreservedEmail,
+  isPreservedOrgNr,
+  isPreservedPhone,
+  replaceUnlessPreserved,
+} from "./pii-preserve";
 
 export type PostHogConfig = {
   apiKey: string;
@@ -40,15 +46,24 @@ const ORG_NR_RE = /(?<!\d)\d{3}(?: \d{3} \d{3}|\d{6})(?!\d)/g;
 // Norwegian 8-digit phone: 12345678, 123 45 678 or 12 34 56 78. Plain "1 790" or "4 799" never match.
 const NO_PHONE_RE = /(?<!\d)(?:\d{8}|\d{3} \d{2} \d{3}|\d{2} \d{2} \d{2} \d{2})(?!\d)/g;
 
-/** Mask emails, phone numbers, org numbers and long digit runs. Prices and years are left alone. */
+/**
+ * Mask emails, phone numbers, org numbers and long digit runs. Prices and years are left alone.
+ * Nettsmed public contacts (post@ / sindre@, 466 92 611, org.nr 934 297 571) are preserved.
+ */
 export function maskPii(text: string): string {
-  return text
-    .replace(EMAIL_RE, "[e-post]")
-    .replace(INTL_PHONE_RE, "[telefon]")
-    .replace(NO_00_PHONE_RE, "[telefon]")
-    .replace(LONG_NUMBER_RE, "[nummer]")
-    .replace(ORG_NR_RE, "[org.nr]")
-    .replace(NO_PHONE_RE, "[telefon]");
+  let out = replaceUnlessPreserved(text, EMAIL_RE, "[e-post]", isPreservedEmail);
+  out = replaceUnlessPreserved(out, INTL_PHONE_RE, "[telefon]", isPreservedPhone);
+  out = replaceUnlessPreserved(out, NO_00_PHONE_RE, "[telefon]", isPreservedPhone);
+  // Preserved +47/0047 phones are 10–12 digits and would otherwise become [nummer].
+  out = replaceUnlessPreserved(
+    out,
+    LONG_NUMBER_RE,
+    "[nummer]",
+    (m) => isPreservedPhone(m) || isPreservedOrgNr(m),
+  );
+  out = replaceUnlessPreserved(out, ORG_NR_RE, "[org.nr]", isPreservedOrgNr);
+  out = replaceUnlessPreserved(out, NO_PHONE_RE, "[telefon]", isPreservedPhone);
+  return out;
 }
 
 function contentField(text: string): string {
